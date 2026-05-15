@@ -7,3 +7,5 @@ test.md
 *.vsix
 .DS_Store
 .editorconfig
+scripts/generate_icon.py
+icon-128.png

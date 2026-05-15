@@ -2,6 +2,34 @@
 
 All notable changes to this extension are documented here.
 
+## [0.2.0] - 2026-05-15
+
+A major UX overhaul based on the "Refined Claude" design direction — hybrid
+typography, six new in-preview features, and Korean-first font fallback.
+
+### Added
+- **Hybrid typography**: serif headings (Source Serif 4) + sans body (Source Sans 3) + monospace code (JetBrains Mono), matching the Claude.ai web aesthetic.
+- **Hangul fallback**: Pretendard Variable kicks in per-glyph for Korean text across all stacks (sans / serif / mono).
+- **Heading anchors**: `¶` icon appears on heading hover; click copies the deep-link URL to clipboard.
+- **Code-block chrome**: every fenced block gets a chrome bar with a language pill and a Copy button (with success state).
+- **GitHub-flavored admonitions**: `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, `> [!CAUTION]`, `> [!DANGER]` blockquotes render as colored callouts with title + icon.
+- **Reading progress bar**: thin orange-glow line at the top of the viewport tracks scroll position.
+- **Floating TOC**: auto-built from `h2`–`h4` headings, slide-in panel with active-section highlighting; toggle button in the top-right.
+- **Image zoom**: click any image to open a darkened lightbox; click anywhere or press `Esc` to close. Images with alt text auto-render as captioned `<figure>`.
+- **Mermaid toolbar**: zoom in/out/reset, copy SVG, and fullscreen actions on every diagram.
+- **Print styles**: dedicated `@media print` rules — hides chrome (toggle/TOC/progress/copy buttons), inlines link targets, and respects page breaks.
+
+### Changed
+- **Theme toggle redesigned** as a segmented Auto/Light/Dark pill with SVG icons and ARIA `radiogroup` semantics (keyboard arrows navigate). Replaces the cycling text button.
+- **Color tokens expanded**: separate variables for elevated surfaces, hover states, accent glow, link underline, code chrome background, plus tone-specific palettes for note/tip/warn/danger admonitions.
+- **Typography refined**: tightened heading line-height and letter-spacing; improved spacing between blocks.
+- **Tables**: rounded corners, subtle row hover, uppercase-tracked headers in muted text.
+
+### Internal
+- New `scripts/enhance.js` consolidates the six DOM enhancements (anchors, code chrome, admonitions, progress, image zoom, TOC).
+- `mermaid-init.js` now wraps each diagram in `.md-mermaid` with a `.md-mermaid-bar` toolbar.
+- `theme-toggle.js` builds segmented pill markup with proper ARIA and keyboard navigation.
+
 ## [0.1.1] - 2026-05-15
 
 ### Security

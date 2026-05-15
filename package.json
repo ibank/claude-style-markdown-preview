@@ -1,8 +1,8 @@
 {
   "name": "claude-style-markdown-preview",
   "displayName": "Claude Style Markdown Preview",
-  "description": "A markdown preview styled like Claude Code, with Mermaid diagram support and a light/dark theme toggle.",
-  "version": "0.1.1",
+  "description": "A markdown preview styled like Claude Code (hybrid serif + sans + mono with Hangul Pretendard fallback). Auto/Light/Dark segmented toggle, heading anchors, code copy, GitHub-flavored admonitions, reading progress, image zoom, floating TOC, and Mermaid diagrams with toolbar.",
+  "version": "0.2.0",
   "publisher": "ibank",
   "license": "MIT",
   "author": {
@@ -16,6 +16,7 @@
     "Other",
     "Visualization"
   ],
+  "icon": "icon.png",
   "keywords": [
     "markdown",
     "preview",
@@ -24,7 +25,12 @@
     "monospace",
     "terminal",
     "mermaid",
-    "theme"
+    "theme",
+    "admonition",
+    "toc",
+    "korean",
+    "hangul",
+    "pretendard"
   ],
   "galleryBanner": {
     "color": "#1a1a1a",
@@ -44,6 +50,7 @@
     ],
     "markdown.previewScripts": [
       "./scripts/theme-toggle.js",
+      "./scripts/enhance.js",
       "./scripts/mermaid.min.js",
       "./scripts/mermaid-init.js"
     ]

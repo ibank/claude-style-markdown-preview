@@ -110,17 +110,156 @@
       const svg = result && result.svg ? result.svg : result;
       const bind = result && result.bindFunctions;
 
-      const container = document.createElement('div');
-      container.className = 'mermaid-rendered';
-      container.setAttribute('data-mermaid-source', code);
-      container.innerHTML = svg;
+      const container = buildMermaidContainer(svg, code);
       pre.replaceWith(container);
-      if (typeof bind === 'function') bind(container);
+      const canvas = container.querySelector('.md-mermaid-canvas');
+      if (typeof bind === 'function' && canvas) bind(canvas);
     } catch (err) {
       warn('render error', err);
       cleanupOrphans(id);
       showError(pre, code, err);
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Container with toolbar (zoom in/out/reset, copy SVG, fullscreen)
+  // ─────────────────────────────────────────────────────────────────────
+
+  const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.2;
+
+  const TOOLBAR_ICONS = {
+    zoomIn:  '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="4"/><path d="m9 9 4 4M4 6h4M6 4v4" stroke-linecap="round"/></svg>',
+    zoomOut: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="4"/><path d="m9 9 4 4M4 6h4" stroke-linecap="round"/></svg>',
+    reset:   '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11.5 7a4.5 4.5 0 1 1-1.3-3.2" stroke-linecap="round"/><path d="M11.5 1.5v3h-3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    copy:    '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="4" y="4" width="7" height="7" rx="1.2"/><path d="M4 8.5V3.5A.5.5 0 0 1 4.5 3h5"/></svg>',
+    full:    '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 5.2V2h3.2M11.8 2H9v.2M2 8.8V11h3.2M8.8 12H12V8.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    close:   '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m3.5 3.5 7 7M10.5 3.5l-7 7" stroke-linecap="round"/></svg>',
+  };
+
+  function buildMermaidContainer(svg, code) {
+    const wrap = document.createElement('div');
+    wrap.className = 'md-mermaid';
+    wrap.setAttribute('data-mermaid-source', code);
+
+    const bar = document.createElement('div');
+    bar.className = 'md-mermaid-bar';
+    const label = document.createElement('span');
+    label.className = 'md-mermaid-label';
+    label.textContent = detectMermaidType(code);
+    bar.appendChild(label);
+
+    const actions = document.createElement('div');
+    actions.className = 'md-mermaid-actions';
+
+    const canvas = document.createElement('div');
+    canvas.className = 'md-mermaid-canvas';
+    canvas.innerHTML = svg;
+
+    let zoom = 1;
+    function applyZoom() {
+      canvas.style.transform = 'scale(' + zoom.toFixed(2) + ')';
+    }
+
+    const btnZoomOut = makeBtn('Zoom out', TOOLBAR_ICONS.zoomOut, () => {
+      zoom = Math.max(ZOOM_MIN, +(zoom - ZOOM_STEP).toFixed(2));
+      applyZoom();
+    });
+    const btnZoomIn = makeBtn('Zoom in', TOOLBAR_ICONS.zoomIn, () => {
+      zoom = Math.min(ZOOM_MAX, +(zoom + ZOOM_STEP).toFixed(2));
+      applyZoom();
+    });
+    const btnReset = makeBtn('Reset zoom', TOOLBAR_ICONS.reset, () => {
+      zoom = 1; applyZoom();
+    });
+    const btnCopy = makeBtn('Copy SVG', TOOLBAR_ICONS.copy, () => {
+      copyTextSafe(svg).then(() => flashBtn(btnCopy));
+    });
+    const btnFull = makeBtn('Fullscreen', TOOLBAR_ICONS.full, () => {
+      openFullscreen(svg, code);
+    });
+
+    actions.appendChild(btnZoomOut);
+    actions.appendChild(btnZoomIn);
+    actions.appendChild(btnReset);
+    actions.appendChild(btnCopy);
+    actions.appendChild(btnFull);
+    bar.appendChild(actions);
+
+    wrap.appendChild(bar);
+    wrap.appendChild(canvas);
+    return wrap;
+  }
+
+  function makeBtn(title, iconHtml, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.title = title;
+    b.setAttribute('aria-label', title);
+    b.innerHTML = iconHtml;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function flashBtn(btn) {
+    btn.style.color = 'var(--md-accent)';
+    btn.style.background = 'var(--md-accent-bg)';
+    setTimeout(() => { btn.style.color = ''; btn.style.background = ''; }, 1200);
+  }
+
+  function detectMermaidType(code) {
+    const m = /^\s*(\w[\w-]*)/.exec(code || '');
+    return m ? m[1] : 'mermaid';
+  }
+
+  function copyTextSafe(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    }
+    return Promise.resolve(fallbackCopy(text));
+  }
+  function fallbackCopy(text) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove();
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function openFullscreen(svg, code) {
+    const overlay = document.createElement('div');
+    overlay.className = 'md-mermaid-overlay';
+
+    const bar = document.createElement('div');
+    bar.className = 'md-mermaid-bar';
+    const label = document.createElement('span');
+    label.className = 'md-mermaid-label';
+    label.textContent = detectMermaidType(code) + ' · fullscreen';
+    bar.appendChild(label);
+
+    const actions = document.createElement('div');
+    actions.className = 'md-mermaid-actions';
+    const closeBtn = makeBtn('Close (Esc)', TOOLBAR_ICONS.close, () => overlay.remove());
+    actions.appendChild(closeBtn);
+    bar.appendChild(actions);
+
+    const canvas = document.createElement('div');
+    canvas.className = 'md-mermaid-canvas';
+    canvas.innerHTML = svg;
+
+    overlay.appendChild(bar);
+    overlay.appendChild(canvas);
+    document.body.appendChild(overlay);
+
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        overlay.remove();
+        document.removeEventListener('keydown', onKey);
+      }
+    }
+    document.addEventListener('keydown', onKey);
   }
 
   async function renderAll() {
@@ -135,7 +274,7 @@
 
   async function rerenderAll() {
     if (!ensureInit(true)) return;
-    const containers = document.querySelectorAll('.mermaid-rendered[data-mermaid-source], .mermaid-error-wrap[data-mermaid-source]');
+    const containers = document.querySelectorAll('.md-mermaid[data-mermaid-source], .mermaid-rendered[data-mermaid-source], .mermaid-error-wrap[data-mermaid-source]');
     if (containers.length === 0) {
       renderAll();
       return;
