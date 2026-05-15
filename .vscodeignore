@@ -1,0 +1,9 @@
+.vscode/**
+.git/**
+.gitignore
+**/*.map
+node_modules/**
+test.md
+*.vsix
+.DS_Store
+.editorconfig

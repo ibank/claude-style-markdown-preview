@@ -1,0 +1,58 @@
+{
+  "name": "claude-style-markdown-preview",
+  "displayName": "Claude Style Markdown Preview",
+  "description": "A markdown preview styled like Claude Code, with Mermaid diagram support and a light/dark theme toggle.",
+  "version": "0.1.1",
+  "publisher": "ibank",
+  "license": "MIT",
+  "author": {
+    "name": "ibank",
+    "email": "ibank21@gmail.com"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "markdown",
+    "preview",
+    "claude",
+    "claude code",
+    "monospace",
+    "terminal",
+    "mermaid",
+    "theme"
+  ],
+  "galleryBanner": {
+    "color": "#1a1a1a",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ibank/claude-style-markdown-preview.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ibank/claude-style-markdown-preview/issues"
+  },
+  "homepage": "https://github.com/ibank/claude-style-markdown-preview#readme",
+  "contributes": {
+    "markdown.previewStyles": [
+      "./styles/claude.css"
+    ],
+    "markdown.previewScripts": [
+      "./scripts/theme-toggle.js",
+      "./scripts/mermaid.min.js",
+      "./scripts/mermaid-init.js"
+    ]
+  },
+  "scripts": {
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.0"
+  }
+}
