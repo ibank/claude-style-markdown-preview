@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Option D · Glyph
+       Solid orange tile with a single M glyph and a terminal underscore cursor.
+       Brand-forward (warm Claude orange occupies the whole tile), most legible
+       at marketplace thumbnail sizes, distinctive next to plain blue/grey
+       extension icons. From "Marketplace icon — 4 concepts" exploration. -->
+  <defs>
+    <linearGradient id="dBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d97757"/>
+      <stop offset="0.5" stop-color="#c0532f"/>
+      <stop offset="1" stop-color="#8e3e1f"/>
+    </linearGradient>
+    <linearGradient id="dShine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="256" height="256" fill="url(#dBg)"/>
+  <rect width="256" height="256" fill="url(#dShine)"/>
+
+  <!-- subtle scanline detail (terminal nod) -->
+  <g opacity="0.08" stroke="#000" stroke-width="0.5">
+    <line x1="0" y1="64"  x2="256" y2="64"/>
+    <line x1="0" y1="128" x2="256" y2="128"/>
+    <line x1="0" y1="192" x2="256" y2="192"/>
+  </g>
+
+  <!-- M glyph — uniform rounded strokes -->
+  <g fill="none" stroke="#fbf3e8" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M58 196 L58 76 L128 156 L198 76 L198 196"/>
+  </g>
+
+  <!-- terminal underscore cursor under M -->
+  <rect x="78" y="212" width="100" height="8" rx="4" fill="#fbf3e8" opacity="0.92"/>
+</svg>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Option B · Sigil
+       Bold # hash in warm orange on dark, with subtle terminal corner brackets.
+       Maximum legibility at small sizes — the # is the universal markdown
+       signal. From "Marketplace icon — 4 concepts" exploration. -->
+  <defs>
+    <radialGradient id="bBg" cx="0.35" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#2a211a"/>
+      <stop offset="1" stop-color="#0d0a07"/>
+    </radialGradient>
+    <linearGradient id="bHash" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4b48b"/>
+      <stop offset="1" stop-color="#c0532f"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" fill="url(#bBg)"/>
+  <g stroke="#4a3f33" stroke-width="2.5" fill="none" stroke-linecap="round">
+    <path d="M28 50 L28 28 L50 28"/>
+    <path d="M206 28 L228 28 L228 50"/>
+    <path d="M28 206 L28 228 L50 228"/>
+    <path d="M206 228 L228 228 L228 206"/>
+  </g>
+  <g fill="url(#bHash)">
+    <rect x="78"  y="56" width="22" height="144" rx="4" transform="rotate(10 89 128)"/>
+    <rect x="156" y="56" width="22" height="144" rx="4" transform="rotate(10 167 128)"/>
+    <rect x="50"  y="96"  width="160" height="22" rx="4"/>
+    <rect x="46"  y="148" width="160" height="22" rx="4"/>
+  </g>
+</svg>

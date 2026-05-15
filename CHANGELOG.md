@@ -2,6 +2,12 @@
 
 All notable changes to this extension are documented here.
 
+## [0.2.1] - 2026-05-15
+
+### Changed
+- **Marketplace icon** replaced with the "Glyph" concept (Option D from the icon exploration): solid Claude-orange gradient tile with a single rounded `M` glyph and a terminal underscore cursor. Better legibility at marketplace thumbnail sizes (32 / 24 px) and stronger brand presence next to typical blue/grey extension icons.
+- Icon generator (`scripts/generate_icon.py`) rewritten to rasterise from SVG via `rsvg-convert` (with ImageMagick fallback). Source SVGs for all four explored concepts are kept in `assets/` so the shipped icon can be swapped by changing one constant and re-running the script.
+
 ## [0.2.0] - 2026-05-15
 
 A major UX overhaul based on the "Refined Claude" design direction — hybrid
