@@ -279,13 +279,13 @@
     const overlay = document.createElement('div');
     overlay.className = 'md-img-overlay';
     overlay.innerHTML = '<img src="' + escapeAttr(src) + '" alt="' + escapeAttr(alt || '') + '">';
-    overlay.addEventListener('click', function () { overlay.remove(); });
-    document.addEventListener('keydown', function onKey(e) {
-      if (e.key === 'Escape') {
-        overlay.remove();
-        document.removeEventListener('keydown', onKey);
-      }
-    });
+    function close() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    overlay.addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
     document.body.appendChild(overlay);
   }
 

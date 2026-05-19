@@ -2,6 +2,48 @@
 
 All notable changes to this extension are documented here.
 
+## [0.3.0] - 2026-05-19
+
+A maintenance + reliability release after a fresh review against current best
+practices. No visual changes; payload trimmed and edge cases tightened.
+
+### Added
+- **Pretendard Variable bundled locally** (`fonts/PretendardVariable.woff2`,
+  ~2.0 MB woff2) — Hangul rendering now works offline and is immune to
+  webview CSP / `markdown.preview.security` settings that block CDN fetches.
+  Source Sans / Source Serif / JetBrains Mono still come from Google Fonts via
+  `@import` with `display: swap` and have system-font fallbacks in the stack.
+- `@media (prefers-reduced-motion: reduce)` — disables every CSS transition
+  and animation when the user has opted in to OS-level motion reduction.
+- `print-color-adjust: exact` on `@media print` — preserves admonition,
+  syntax-highlight, and accent colors when saving to PDF.
+
+### Fixed
+- **`keydown` listener leak** in the image lightbox and Mermaid fullscreen
+  overlays. Closing via click (not `Esc`) was leaving the listener attached;
+  opening N times accumulated N handlers. Both overlays now share a single
+  `close()` that removes the listener regardless of close path.
+
+### Changed
+- `engines.vscode` bumped `^1.74.0` → `^1.95.0` (Nov 2022 → Oct 2024).
+  The contribution points used (`markdown.previewStyles`,
+  `markdown.previewScripts`) have been stable across this range — the bump
+  just signals that we don't claim compatibility with ancient VS Code.
+- `@vscode/vsce` devDep bumped `^3.2.0` → `^3.6.0`.
+- `.vscodeignore` now excludes `.github/`, `assets/` (icon exploration SVGs),
+  and the dev-only icon source — trims the published `.vsix` of ~8 KB of
+  unreferenced files.
+
+### Investigated, intentionally not done
+- **Mermaid v10.9.1 → v11.x**: v11 (currently 11.15.0) no longer ships a
+  UMD bundle with a `mermaid` global. The published `dist/mermaid.min.js`
+  stores its API in an internal `__esbuild_esm_mermaid_nm` registry that
+  is not part of the documented surface. The only stable v11 distribution
+  is the ESM build, which VS Code's `markdown.previewScripts` contribution
+  point cannot load (no `type="module"` support). Staying on v10.9.1 until
+  Mermaid restores a stable global export or VS Code supports module
+  scripts in preview contributions.
+
 ## [0.2.1] - 2026-05-15
 
 ### Changed

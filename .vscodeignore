@@ -1,6 +1,7 @@
 .vscode/**
 .git/**
 .gitignore
+.github/**
 **/*.map
 node_modules/**
 test.md
@@ -9,3 +10,4 @@ test.md
 .editorconfig
 scripts/generate_icon.py
 icon-128.png
+assets/**

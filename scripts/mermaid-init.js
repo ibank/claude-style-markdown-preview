@@ -241,7 +241,12 @@
 
     const actions = document.createElement('div');
     actions.className = 'md-mermaid-actions';
-    const closeBtn = makeBtn('Close (Esc)', TOOLBAR_ICONS.close, () => overlay.remove());
+    function close() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    const closeBtn = makeBtn('Close (Esc)', TOOLBAR_ICONS.close, close);
     actions.appendChild(closeBtn);
     bar.appendChild(actions);
 
@@ -253,12 +258,6 @@
     overlay.appendChild(canvas);
     document.body.appendChild(overlay);
 
-    function onKey(e) {
-      if (e.key === 'Escape') {
-        overlay.remove();
-        document.removeEventListener('keydown', onKey);
-      }
-    }
     document.addEventListener('keydown', onKey);
   }
 
