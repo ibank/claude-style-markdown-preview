@@ -2,6 +2,18 @@
 
 All notable changes to this extension are documented here.
 
+## [0.4.1] - 2026-05-24
+
+### Fixed
+- **Packaging hygiene** — `.gstack/` and `.harness/` (local dev/debug scratch
+  dirs) are now excluded via `.vscodeignore`, so they no longer get bundled into
+  the published `.vsix`. 0.4.0 accidentally shipped ~5 KB of harmless browse
+  debug logs.
+
+### Docs
+- README publish step uses `npx @vscode/vsce` (the maintained package) instead
+  of the deprecated `npx vsce`.
+
 ## [0.4.0] - 2026-05-24
 
 Interactive zoom: zoom the whole preview like a browser, and pan/zoom Mermaid

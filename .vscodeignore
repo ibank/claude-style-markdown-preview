@@ -2,6 +2,8 @@
 .git/**
 .gitignore
 .github/**
+.gstack/**
+.harness/**
 **/*.map
 node_modules/**
 test.md

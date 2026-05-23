@@ -158,8 +158,8 @@ npx --yes @vscode/vsce package --no-dependencies
 Requires a registered publisher at https://marketplace.visualstudio.com/manage and an Azure DevOps PAT with **Marketplace → Manage** scope.
 
 ```bash
-npx vsce login <publisher>
-npx vsce publish --no-dependencies
+npx @vscode/vsce login <publisher>
+npx @vscode/vsce publish --no-dependencies
 ```
 
 ### Publish to Open VSX (for VSCodium / Cursor users)
