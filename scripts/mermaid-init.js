@@ -228,6 +228,8 @@
     } catch (_) { return false; }
   }
 
+  const FS_ZOOM_MIN = 0.4, FS_ZOOM_MAX = 6, FS_ZOOM_FACTOR = 1.2;
+
   function openFullscreen(svg, code) {
     const overlay = document.createElement('div');
     overlay.className = 'md-mermaid-overlay';
@@ -239,25 +241,93 @@
     label.textContent = detectMermaidType(code) + ' · fullscreen';
     bar.appendChild(label);
 
-    const actions = document.createElement('div');
-    actions.className = 'md-mermaid-actions';
-    function close() {
-      overlay.remove();
-      document.removeEventListener('keydown', onKey);
-    }
-    function onKey(e) { if (e.key === 'Escape') close(); }
-    const closeBtn = makeBtn('Close (Esc)', TOOLBAR_ICONS.close, close);
-    actions.appendChild(closeBtn);
-    bar.appendChild(actions);
-
     const canvas = document.createElement('div');
     canvas.className = 'md-mermaid-canvas';
     canvas.innerHTML = svg;
+    const svgEl = canvas.querySelector('svg');
+    if (svgEl) svgEl.style.transformOrigin = 'center center';
+
+    // Pan + zoom state. The SVG keeps its flex-centered layout position;
+    // we transform it on top of that. `C` (the canvas center) stays constant
+    // because transforms don't affect layout, so cursor-anchored zoom math
+    // can read it fresh on each event.
+    let zoom = 1, panX = 0, panY = 0;
+    function applyTransform() {
+      if (svgEl) svgEl.style.transform =
+        'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom.toFixed(3) + ')';
+    }
+
+    // Zoom toward (mx, my) in viewport coords, keeping that point fixed.
+    function zoomTo(nextZoom, mx, my) {
+      nextZoom = Math.min(FS_ZOOM_MAX, Math.max(FS_ZOOM_MIN, nextZoom));
+      if (nextZoom === zoom) return;
+      const rect = canvas.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const ratio = nextZoom / zoom;
+      panX = (mx - cx) - ratio * ((mx - cx) - panX);
+      panY = (my - cy) - ratio * ((my - cy) - panY);
+      zoom = nextZoom;
+      applyTransform();
+    }
+    function zoomFromCenter(nextZoom) {
+      const rect = canvas.getBoundingClientRect();
+      zoomTo(nextZoom, rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }
+
+    function onWheel(e) {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? FS_ZOOM_FACTOR : 1 / FS_ZOOM_FACTOR;
+      zoomTo(zoom * factor, e.clientX, e.clientY);
+    }
+
+    let dragging = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
+    function onDown(e) {
+      if (e.button !== 0) return;
+      dragging = true;
+      startX = e.clientX; startY = e.clientY;
+      startPanX = panX; startPanY = panY;
+      canvas.classList.add('is-grabbing');
+      e.preventDefault();
+    }
+    function onMove(e) {
+      if (!dragging) return;
+      panX = startPanX + (e.clientX - startX);
+      panY = startPanY + (e.clientY - startY);
+      applyTransform();
+    }
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      canvas.classList.remove('is-grabbing');
+    }
+
+    function close() {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+
+    const actions = document.createElement('div');
+    actions.className = 'md-mermaid-actions';
+    actions.appendChild(makeBtn('Zoom out', TOOLBAR_ICONS.zoomOut, () => zoomFromCenter(zoom / FS_ZOOM_FACTOR)));
+    actions.appendChild(makeBtn('Zoom in', TOOLBAR_ICONS.zoomIn, () => zoomFromCenter(zoom * FS_ZOOM_FACTOR)));
+    actions.appendChild(makeBtn('Reset zoom', TOOLBAR_ICONS.reset, () => {
+      zoom = 1; panX = 0; panY = 0; applyTransform();
+    }));
+    actions.appendChild(makeBtn('Close (Esc)', TOOLBAR_ICONS.close, close));
+    bar.appendChild(actions);
 
     overlay.appendChild(bar);
     overlay.appendChild(canvas);
     document.body.appendChild(overlay);
 
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
     document.addEventListener('keydown', onKey);
   }
 

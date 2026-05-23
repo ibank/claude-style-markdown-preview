@@ -2,7 +2,7 @@
   "name": "claude-style-markdown-preview",
   "displayName": "Claude Style Markdown Preview",
   "description": "A markdown preview styled like Claude Code (hybrid serif + sans + mono with Hangul Pretendard fallback). Auto/Light/Dark segmented toggle, heading anchors, code copy, GitHub-flavored admonitions, reading progress, image zoom, floating TOC, and Mermaid diagrams with toolbar.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "ibank",
   "license": "MIT",
   "author": {
@@ -50,6 +50,7 @@
     ],
     "markdown.previewScripts": [
       "./scripts/theme-toggle.js",
+      "./scripts/page-zoom.js",
       "./scripts/enhance.js",
       "./scripts/mermaid.min.js",
       "./scripts/mermaid-init.js"

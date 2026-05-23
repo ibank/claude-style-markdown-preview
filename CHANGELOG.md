@@ -2,6 +2,27 @@
 
 All notable changes to this extension are documented here.
 
+## [0.4.0] - 2026-05-24
+
+Interactive zoom: zoom the whole preview like a browser, and pan/zoom Mermaid
+diagrams in fullscreen.
+
+### Added
+- **Whole-page zoom** — `Cmd/Ctrl` + `+` / `-` / `0` and `Cmd/Ctrl` + mouse
+  wheel (including macOS trackpad pinch) zoom the entire preview. Level is
+  clamped to 50%–300%, persists across edits/reopens, and a bottom-center pill
+  shows the current level (click it to reset). New `scripts/page-zoom.js`.
+- **Pan & zoom in the Mermaid fullscreen view** — mouse-wheel zoom anchored to
+  the cursor, click-drag panning, and zoom-in / zoom-out / reset buttons in the
+  toolbar (zoom clamped to 0.4×–6×). The inline diagram toolbar already had
+  button zoom; fullscreen now matches and adds wheel + drag.
+
+### Fixed
+- **Google Fonts `@import` was being ignored since 0.3.0** — it sat after the
+  bundled-Pretendard `@font-face`, but the CSS spec requires `@import` to
+  precede all other rules, so Source Sans 3 / Source Serif 4 / JetBrains Mono
+  silently fell back to system fonts. Moved the `@import` ahead of `@font-face`.
+
 ## [0.3.0] - 2026-05-19
 
 A maintenance + reliability release after a fresh review against current best
