@@ -2,6 +2,17 @@
 
 All notable changes to this extension are documented here.
 
+## [0.5.0] - 2026-05-24
+
+### Added
+- **Syntax highlighting** ([#1](https://github.com/ibank/claude-style-markdown-preview/issues/1))
+  — code blocks are now highlighted with a Claude-themed palette (warm tones for
+  dark, deep earthy tones for light) instead of relying on VS Code's built-in
+  highlighting, which doesn't reliably produce tokens in the preview. Bundles
+  highlight.js v11.9.0 (common languages, BSD-3-Clause) and re-highlights each
+  block in `enhance.js`; unlabeled blocks get an auto-detected language shown in
+  the chrome pill. Colors follow the active theme via `--md-hl-*` tokens.
+
 ## [0.4.1] - 2026-05-24
 
 ### Fixed

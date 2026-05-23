@@ -78,6 +78,18 @@ body.vscode-high-contrast {
   --md-tone-tip:    #8ec081; --md-tone-tip-bg:    rgba(142, 192, 129, 0.08); --md-tone-tip-border:    rgba(142, 192, 129, 0.22);
   --md-tone-warn:   #e8a87c; --md-tone-warn-bg:   rgba(232, 168, 124, 0.10); --md-tone-warn-border:   rgba(232, 168, 124, 0.24);
   --md-tone-danger: #d97757; --md-tone-danger-bg: rgba(217, 119, 87, 0.10);  --md-tone-danger-border: rgba(217, 119, 87, 0.28);
+
+  /* syntax highlighting — dark palette */
+  --md-hl-comment:  #7c7368;
+  --md-hl-keyword:  #ea9a78;
+  --md-hl-string:   #a7bd86;
+  --md-hl-number:   #e0b07a;
+  --md-hl-function: #f0cd96;
+  --md-hl-type:     #87b8ad;
+  --md-hl-variable: #d6bfa0;
+  --md-hl-meta:     #948d84;
+  --md-hl-add: #a7bd86; --md-hl-add-bg: rgba(120, 150, 90, 0.12);
+  --md-hl-del: #e08a78; --md-hl-del-bg: rgba(200, 90, 80, 0.12);
 }
 
 /* =====================================================================
@@ -112,6 +124,18 @@ body.vscode-light {
   --md-tone-tip:    #557e44; --md-tone-tip-bg:    rgba(85, 126, 68, 0.06);  --md-tone-tip-border:    rgba(85, 126, 68, 0.22);
   --md-tone-warn:   #b85a35; --md-tone-warn-bg:   rgba(184, 90, 53, 0.06);  --md-tone-warn-border:   rgba(184, 90, 53, 0.22);
   --md-tone-danger: #a8332b; --md-tone-danger-bg: rgba(168, 51, 43, 0.08);  --md-tone-danger-border: rgba(168, 51, 43, 0.30);
+
+  /* syntax highlighting — light palette */
+  --md-hl-comment:  #a39a8c;
+  --md-hl-keyword:  #b3502a;
+  --md-hl-string:   #5c7a36;
+  --md-hl-number:   #9c5d24;
+  --md-hl-function: #8a6a16;
+  --md-hl-type:     #2c7a6e;
+  --md-hl-variable: #845c38;
+  --md-hl-meta:     #978f82;
+  --md-hl-add: #4a6a2a; --md-hl-add-bg: rgba(120, 150, 90, 0.15);
+  --md-hl-del: #b3402a; --md-hl-del-bg: rgba(200, 90, 80, 0.12);
 }
 
 /* =====================================================================
@@ -145,6 +169,16 @@ body.claude-force-dark {
   --md-tone-tip:  #8ec081; --md-tone-tip-bg:  rgba(142,192,129,0.08); --md-tone-tip-border:  rgba(142,192,129,0.22);
   --md-tone-warn: #e8a87c; --md-tone-warn-bg: rgba(232,168,124,0.10); --md-tone-warn-border: rgba(232,168,124,0.24);
   --md-tone-danger: #d97757; --md-tone-danger-bg: rgba(217,119,87,0.10); --md-tone-danger-border: rgba(217,119,87,0.28);
+  --md-hl-comment:  #7c7368;
+  --md-hl-keyword:  #ea9a78;
+  --md-hl-string:   #a7bd86;
+  --md-hl-number:   #e0b07a;
+  --md-hl-function: #f0cd96;
+  --md-hl-type:     #87b8ad;
+  --md-hl-variable: #d6bfa0;
+  --md-hl-meta:     #948d84;
+  --md-hl-add: #a7bd86; --md-hl-add-bg: rgba(120, 150, 90, 0.12);
+  --md-hl-del: #e08a78; --md-hl-del-bg: rgba(200, 90, 80, 0.12);
   background: #1a1a1a;
 }
 
@@ -175,6 +209,16 @@ body.claude-force-light {
   --md-tone-tip:  #557e44; --md-tone-tip-bg:  rgba(85,126,68,0.06);  --md-tone-tip-border:  rgba(85,126,68,0.22);
   --md-tone-warn: #b85a35; --md-tone-warn-bg: rgba(184,90,53,0.06);  --md-tone-warn-border: rgba(184,90,53,0.22);
   --md-tone-danger: #a8332b; --md-tone-danger-bg: rgba(168,51,43,0.08); --md-tone-danger-border: rgba(168,51,43,0.30);
+  --md-hl-comment:  #a39a8c;
+  --md-hl-keyword:  #b3502a;
+  --md-hl-string:   #5c7a36;
+  --md-hl-number:   #9c5d24;
+  --md-hl-function: #8a6a16;
+  --md-hl-type:     #2c7a6e;
+  --md-hl-variable: #845c38;
+  --md-hl-meta:     #978f82;
+  --md-hl-add: #4a6a2a; --md-hl-add-bg: rgba(120, 150, 90, 0.15);
+  --md-hl-del: #b3402a; --md-hl-del-bg: rgba(200, 90, 80, 0.12);
   background: #faf9f7;
 }
 
@@ -409,6 +453,69 @@ pre > code {
 }
 .md-code-copy:hover { background: var(--md-hover); color: var(--md-text); border-color: var(--md-border-soft); }
 .md-code-copy.is-copied { color: var(--md-accent); border-color: var(--md-accent-bg); background: var(--md-accent-bg); }
+
+/* =====================================================================
+   SYNTAX HIGHLIGHTING — Claude-themed highlight.js token palette.
+   highlight.js runs in enhance.js; colors come from --md-hl-* (per theme).
+   The `.md-code-wrap code` prefix (specificity 0,2,1) overrides VS Code's
+   built-in highlight.css (which loads first and tops out at 0,2,0).
+   ===================================================================== */
+
+.md-code-wrap code .hljs-comment,
+.md-code-wrap code .hljs-quote { color: var(--md-hl-comment); font-style: italic; }
+
+.md-code-wrap code .hljs-keyword,
+.md-code-wrap code .hljs-selector-tag,
+.md-code-wrap code .hljs-name,
+.md-code-wrap code .hljs-section,
+.md-code-wrap code .hljs-doctag { color: var(--md-hl-keyword); }
+
+.md-code-wrap code .hljs-string,
+.md-code-wrap code .hljs-regexp,
+.md-code-wrap code .hljs-char.escape_,
+.md-code-wrap code .hljs-meta .hljs-string { color: var(--md-hl-string); }
+
+.md-code-wrap code .hljs-number,
+.md-code-wrap code .hljs-literal { color: var(--md-hl-number); }
+
+.md-code-wrap code .hljs-title,
+.md-code-wrap code .hljs-title.function_ { color: var(--md-hl-function); }
+
+.md-code-wrap code .hljs-built_in,
+.md-code-wrap code .hljs-type,
+.md-code-wrap code .hljs-title.class_,
+.md-code-wrap code .hljs-class .hljs-title { color: var(--md-hl-type); }
+
+.md-code-wrap code .hljs-attr,
+.md-code-wrap code .hljs-attribute,
+.md-code-wrap code .hljs-variable,
+.md-code-wrap code .hljs-template-variable,
+.md-code-wrap code .hljs-property,
+.md-code-wrap code .hljs-params,
+.md-code-wrap code .hljs-selector-class,
+.md-code-wrap code .hljs-selector-id,
+.md-code-wrap code .hljs-selector-attr,
+.md-code-wrap code .hljs-selector-pseudo { color: var(--md-hl-variable); }
+
+.md-code-wrap code .hljs-meta,
+.md-code-wrap code .hljs-meta .hljs-keyword,
+.md-code-wrap code .hljs-tag { color: var(--md-hl-meta); }
+
+.md-code-wrap code .hljs-symbol,
+.md-code-wrap code .hljs-bullet,
+.md-code-wrap code .hljs-link { color: var(--md-hl-symbol); }
+
+.md-code-wrap code .hljs-emphasis { font-style: italic; }
+.md-code-wrap code .hljs-strong { font-weight: 600; }
+
+.md-code-wrap code .hljs-addition {
+  color: var(--md-hl-add); background: var(--md-hl-add-bg);
+  display: inline-block; width: 100%;
+}
+.md-code-wrap code .hljs-deletion {
+  color: var(--md-hl-del); background: var(--md-hl-del-bg);
+  display: inline-block; width: 100%;
+}
 
 /* =====================================================================
    BLOCKQUOTE

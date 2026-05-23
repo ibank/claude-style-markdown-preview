@@ -91,6 +91,32 @@
     return '';
   }
 
+  // Syntax-highlight a <code> with our bundled highlight.js. We re-highlight
+  // from the raw textContent (which is the same whether or not VS Code's
+  // built-in highlighter already ran), so the result is consistent and themed
+  // by our --md-hl-* palette. Returns the resolved language name, if any.
+  function highlightCode(code, lang) {
+    if (typeof hljs === 'undefined' || code.hasAttribute('data-claude-hl')) return lang;
+    const raw = code.textContent || '';
+    let result = null;
+    try {
+      if (lang && hljs.getLanguage(lang)) {
+        result = hljs.highlight(raw, { language: lang, ignoreIllegals: true });
+      } else if (!lang) {
+        result = hljs.highlightAuto(raw);
+      }
+    } catch (_) {
+      result = null;
+    }
+    if (result) {
+      code.innerHTML = result.value;
+      code.classList.add('hljs');
+      code.setAttribute('data-claude-hl', '1');
+      if (!lang && result.language) return result.language;
+    }
+    return lang;
+  }
+
   function enhanceCodeBlocks() {
     document.querySelectorAll('pre > code').forEach((code) => {
       const pre = code.parentElement;
@@ -102,7 +128,9 @@
       if (isMermaidBlock(code)) return;
       pre.setAttribute(PROCESSED, 'pre');
 
-      const lang = detectLanguage(code);
+      // Highlight first; for unlabeled blocks this resolves an auto-detected
+      // language to show in the pill.
+      const lang = highlightCode(code, detectLanguage(code));
 
       const wrap = document.createElement('div');
       wrap.className = 'md-code-wrap';
