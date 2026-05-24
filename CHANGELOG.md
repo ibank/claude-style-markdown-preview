@@ -2,6 +2,15 @@
 
 All notable changes to this extension are documented here.
 
+## [0.5.1] - 2026-05-24
+
+### Fixed
+- **No more language auto-detection** ([#1](https://github.com/ibank/claude-style-markdown-preview/issues/1))
+  — 0.5.0 ran `highlightAuto` on fences without a language, which misfired on
+  plain-text / ASCII-diagram blocks (e.g. tagging them as SCSS and coloring
+  them). Code is now highlighted only when the fence specifies a language
+  highlight.js recognizes; unlabeled blocks stay plain text.
+
 ## [0.5.0] - 2026-05-24
 
 ### Added

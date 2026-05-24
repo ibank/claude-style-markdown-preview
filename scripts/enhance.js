@@ -91,30 +91,24 @@
     return '';
   }
 
-  // Syntax-highlight a <code> with our bundled highlight.js. We re-highlight
-  // from the raw textContent (which is the same whether or not VS Code's
-  // built-in highlighter already ran), so the result is consistent and themed
-  // by our --md-hl-* palette. Returns the resolved language name, if any.
+  // Syntax-highlight a <code> with our bundled highlight.js, but ONLY when the
+  // fence specifies a language highlight.js recognizes. We deliberately do not
+  // auto-detect: highlightAuto misfires on plain-text / ASCII-diagram blocks
+  // (e.g. tagging them as SCSS), so unlabeled blocks are left as plain text.
+  // We re-highlight from the raw textContent so the result is consistent and
+  // themed by our --md-hl-* palette whether or not VS Code already ran.
   function highlightCode(code, lang) {
-    if (typeof hljs === 'undefined' || code.hasAttribute('data-claude-hl')) return lang;
+    if (typeof hljs === 'undefined' || code.hasAttribute('data-claude-hl')) return;
+    if (!lang || !hljs.getLanguage(lang)) return;
     const raw = code.textContent || '';
-    let result = null;
     try {
-      if (lang && hljs.getLanguage(lang)) {
-        result = hljs.highlight(raw, { language: lang, ignoreIllegals: true });
-      } else if (!lang) {
-        result = hljs.highlightAuto(raw);
-      }
-    } catch (_) {
-      result = null;
-    }
-    if (result) {
+      const result = hljs.highlight(raw, { language: lang, ignoreIllegals: true });
       code.innerHTML = result.value;
       code.classList.add('hljs');
       code.setAttribute('data-claude-hl', '1');
-      if (!lang && result.language) return result.language;
+    } catch (_) {
+      /* leave as plain text */
     }
-    return lang;
   }
 
   function enhanceCodeBlocks() {
@@ -128,9 +122,8 @@
       if (isMermaidBlock(code)) return;
       pre.setAttribute(PROCESSED, 'pre');
 
-      // Highlight first; for unlabeled blocks this resolves an auto-detected
-      // language to show in the pill.
-      const lang = highlightCode(code, detectLanguage(code));
+      const lang = detectLanguage(code);
+      highlightCode(code, lang);
 
       const wrap = document.createElement('div');
       wrap.className = 'md-code-wrap';
