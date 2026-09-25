@@ -320,7 +320,7 @@ h6:hover .md-anchor { opacity: 0.65; }
    PARAGRAPHS, LINKS, INLINE
    ===================================================================== */
 
-p { margin: 0.9em 0; color: var(--md-text); }
+p { margin: 0.9em 0; }
 
 a {
   color: var(--md-link);
@@ -408,6 +408,7 @@ pre > code {
 pre.md-code {
   margin: 1.4em 0;
   padding: 0;
+  border-radius: 10px; /* beats VS Code's pre:not(.hljs) { border-radius: 3px } */
   overflow: hidden;
   box-shadow: var(--md-shadow);
 }
@@ -725,6 +726,10 @@ pre.md-mermaid {
   white-space: normal;
 }
 pre.md-mermaid > code { display: none; }
+/* HTML labels (Mermaid 11 wraps their text in <p>) take their colors from
+   the diagram (theme, classDef, style), not from the page's element rules. */
+.md-mermaid-canvas foreignObject *,
+.markdown-body .mermaid foreignObject * { color: inherit; }
 .md-mermaid-bar {
   display: flex;
   align-items: center;
@@ -825,6 +830,7 @@ pre.md-mermaid > code { display: none; }
 pre.md-mermaid-error {
   padding: 0;
   border-color: var(--md-tone-danger-border);
+  border-radius: 10px;
   overflow: hidden;
 }
 pre.md-mermaid-error > code {

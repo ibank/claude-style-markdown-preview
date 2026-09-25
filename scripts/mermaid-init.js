@@ -45,7 +45,13 @@
         const script = document.createElement('script');
         script.src = SCRIPT_DIR + 'mermaid.min.js';
         if (NONCE) script.nonce = NONCE;
-        script.onload = () => resolve(mermaidReady());
+        script.onload = () => {
+          // Mermaid auto-renders every `.mermaid` element on window `load`
+          // unless told not to; those belong to VS Code's built-in renderer
+          // (```vscode-mermaid, `::: mermaid`). Our initialize() comes later.
+          if (mermaidReady()) mermaid.startOnLoad = false;
+          resolve(mermaidReady());
+        };
         script.onerror = () => { warn('mermaid.min.js failed to load'); resolve(false); };
         document.head.appendChild(script);
       });
@@ -205,8 +211,23 @@
 
   function retheme(pre, entry, theme) {
     const code = pre.querySelector(':scope > code');
-    if (!pre.isConnected || !code) return;
-    fill(pre, code, entry, pre.getAttribute('data-mermaid-source'), theme);
+    const source = pre.getAttribute('data-mermaid-source');
+    if (!pre.isConnected || !code || source === null) return;
+    fill(pre, code, entry, source, theme);
+  }
+
+  // morphdom updates a fence's <pre>/<code> in place, so by the time an async
+  // render finishes the block may hold different source, or have been placed
+  // or stripped meanwhile. Only a still-matching block may take the result.
+  function blockIsCurrent(block) {
+    const { pre, code } = block;
+    return pre.isConnected && code.parentElement === pre && !code.hasAttribute(PROCESSED) &&
+      (code.textContent || '').replace(/\s+$/, '') === block.source;
+  }
+
+  function cardIsCurrent(pre, source) {
+    return pre.isConnected && pre.classList.contains('md-mermaid') &&
+      pre.getAttribute('data-mermaid-source') === source;
   }
 
   function fill(pre, code, entry, source, theme) {
@@ -270,13 +291,14 @@
         for (const block of findBlocks()) {
           const entry = await render(block.source, theme);
           if (theme !== currentTheme()) { again = true; break; }
-          place(block, entry, theme);
+          if (blockIsCurrent(block)) place(block, entry, theme); else again = true;
         }
         if (again) continue;
         for (const card of staleCards(theme)) {
-          const entry = await render(card.getAttribute('data-mermaid-source'), theme);
+          const source = card.getAttribute('data-mermaid-source');
+          const entry = await render(source, theme);
           if (theme !== currentTheme()) { again = true; break; }
-          retheme(card, entry, theme);
+          if (cardIsCurrent(card, source)) retheme(card, entry, theme); else again = true;
         }
       } while (again);
     } catch (err) {

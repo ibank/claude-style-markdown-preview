@@ -84,6 +84,9 @@ injected after load, morphdom updates, and its own code copy buttons.
 - In a narrow preview, the floating theme toggle and TOC button **step aside
   while you scroll down**, instead of covering the top-right of the text,
   where code and diagram toolbars sit. They return when you scroll up.
+- Headings written as raw HTML without an `id` (such as a centered
+  `<h1 align="center">` README title) no longer get a ¶ link or a TOC entry.
+  Adding an id to them made every edit rebuild the rest of the page.
 - Respects VS Code's own **Reduce Motion** setting as well as the OS one.
 - Closed TOC, hidden zoom badge and overlays are keyboard- and
   screen-reader-friendly (hidden panels leave the tab order; overlays are

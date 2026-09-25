@@ -21,28 +21,13 @@
     return document.querySelector('.markdown-body') || document.body;
   }
 
+  // Diagram labels (HTML inside Mermaid's SVG, ours or VS Code's built-in)
+  // and overlays are not document content: never enhance inside them.
+  const NOT_CONTENT = '.md-mermaid, .mermaid, .md-mermaid-overlay, .md-img-overlay';
+
   // ─────────────────────────────────────────────────────────────────────
   // Heading anchors — ¶ icon on hover, click to copy the #fragment
   // ─────────────────────────────────────────────────────────────────────
-
-  function slugify(text) {
-    return String(text)
-      .toLowerCase()
-      .trim()
-      .replace(/[\s ]+/g, '-')
-      .replace(/[^\p{Letter}\p{Number}\-_]+/gu, '')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80) || 'section';
-  }
-
-  function ensureUniqueId(base, used) {
-    if (!used.has(base)) { used.add(base); return base; }
-    let n = 2;
-    while (used.has(base + '-' + n)) n++;
-    const id = base + '-' + n;
-    used.add(id);
-    return id;
-  }
 
   function headingText(h) {
     const clone = h.cloneNode(true);
@@ -50,16 +35,14 @@
     return (clone.textContent || '').trim();
   }
 
+  // Only headings with an id (VS Code gives every markdown heading one) get
+  // a link. Raw-HTML headings without one are left alone: an id we added
+  // would make VS Code's morphdom treat the old element as keyed, fail to
+  // match it, and rebuild everything after it on every edit.
   function enhanceHeadings(root) {
-    const headings = Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'))
-      .filter((h) => !h.closest('.md-mermaid'));
-    const used = new Set(headings.filter((h) => h.id).map((h) => h.id));
-
-    headings.forEach((h) => {
-      if (h.hasAttribute(PROCESSED)) return;
+    root.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]').forEach((h) => {
+      if (h.hasAttribute(PROCESSED) || h.closest(NOT_CONTENT)) return;
       h.setAttribute(PROCESSED, 'h');
-      // VS Code assigns GitHub-style ids; this only covers raw-HTML headings.
-      if (!h.id) h.id = ensureUniqueId(slugify(headingText(h)), used);
 
       const a = document.createElement('a');
       a.className = 'md-anchor';
@@ -128,7 +111,7 @@
     root.querySelectorAll('pre > code').forEach((code) => {
       const pre = code.parentElement;
       // mermaid-init.js owns ```mermaid fences and turns them into cards.
-      if (code.classList.contains('language-mermaid') || pre.matches('.md-mermaid, .md-mermaid-error')) return;
+      if (code.classList.contains('language-mermaid') || pre.matches('.md-mermaid-error') || pre.closest(NOT_CONTENT)) return;
       if (!pre.hasAttribute(PROCESSED)) {
         pre.setAttribute(PROCESSED, 'pre');
         pre.classList.add('md-code');
@@ -181,7 +164,7 @@
 
   function enhanceAdmonitions(root) {
     root.querySelectorAll('blockquote').forEach((bq) => {
-      if (bq.hasAttribute(PROCESSED)) return;
+      if (bq.hasAttribute(PROCESSED) || bq.closest(NOT_CONTENT)) return;
       const first = bq.firstElementChild;
       if (!first || first.tagName !== 'P') return;
       const m = ADMON_RE.exec(first.textContent || '');
@@ -237,7 +220,7 @@
 
   function enhanceImages(root) {
     root.querySelectorAll('img').forEach((img) => {
-      if (img.hasAttribute(PROCESSED) || img.closest('.md-mermaid, .md-img-overlay')) return;
+      if (img.hasAttribute(PROCESSED) || img.closest(NOT_CONTENT)) return;
       img.setAttribute(PROCESSED, 'img');
       if (img.closest('a[href]')) return; // linked images (badges, logos) keep their link
       img.classList.add('md-zoomable');
@@ -252,7 +235,7 @@
     // enhanceCodeBlocks for why). Images inline with text stay inline.
     root.querySelectorAll('p > img:only-child').forEach((img) => {
       const p = img.parentElement;
-      if (hasOwnText(p)) return;
+      if (hasOwnText(p) || p.closest(NOT_CONTENT)) return;
       const alt = (img.getAttribute('alt') || '').trim();
       if (!alt) {
         img.classList.add('md-block-img');
@@ -318,7 +301,7 @@
 
   function buildToc(root) {
     const headings = Array.from(root.querySelectorAll('h2[id], h3[id], h4[id]'))
-      .filter((h) => !h.closest('.md-mermaid'));
+      .filter((h) => !h.closest(NOT_CONTENT));
 
     // Not worth a TOC for short documents.
     if (headings.length < 2) {
