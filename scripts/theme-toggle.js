@@ -41,8 +41,14 @@
     return 'dark';
   }
 
+  // Also mirrors the effective theme to <body data-claude-theme="light|dark">,
+  // a stable hook for user stylesheets (markdown.styles) — the class names
+  // alone are ambiguous when a forced theme differs from VS Code's.
   function notifyIfChanged() {
     const effective = getEffectiveTheme();
+    if (document.body.getAttribute('data-claude-theme') !== effective) {
+      document.body.setAttribute('data-claude-theme', effective);
+    }
     if (effective === lastEffective) return;
     lastEffective = effective;
     try {
