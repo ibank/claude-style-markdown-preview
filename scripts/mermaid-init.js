@@ -1,194 +1,283 @@
+// Claude Style Markdown Preview — Mermaid diagrams
+// Runs in the VS Code markdown preview webview next to the bundled Mermaid
+// build (scripts/mermaid.min.js, which defines the `mermaid` global).
+//
+// Renders ```mermaid fences into a card with a toolbar (zoom, copy SVG,
+// fullscreen with pan & zoom). An unlabeled fence is rendered too when its
+// first line is a Mermaid diagram header and it parses; anything else stays
+// an ordinary code block.
+//
+// VS Code patches the preview with morphdom on every edit, which turns our
+// cards back into plain <pre><code> blocks. Results are cached per theme +
+// source, so the `vscode.markdown.updateContent` handler restores the cards
+// synchronously (before the next paint) instead of re-rendering. Cards are
+// re-themed when the effective light/dark theme changes.
+
 (function () {
   const TAG = '[claude-md-mermaid]';
-  let renderCount = 0;
-  let lastTheme = null;
+  const PROCESSED = 'data-mermaid-processed';
+  const SCRIPT_DIR = ((document.currentScript && document.currentScript.src) || '').replace(/[^/]*$/, '');
+  const CACHE_MAX = 64;
 
-  function log(...args) { try { console.log(TAG, ...args); } catch (_) {} }
+  const cache = new Map(); // theme + '\n' + source -> { svg } | { error }
+  let initializedTheme = null;
+  let renderSeq = 0;
+  let busy = false;
+  let again = false;
+  let fontsWait = null;
+
   function warn(...args) { try { console.warn(TAG, ...args); } catch (_) {} }
 
+  function mermaidReady() {
+    return typeof mermaid !== 'undefined' && typeof mermaid.render === 'function';
+  }
+
+  // Mermaid theme for the effective preview theme. VS Code tags High
+  // Contrast Light with both `vscode-high-contrast-light` and (for backwards
+  // compatibility) `vscode-high-contrast`, so check the light classes first.
   function currentTheme() {
-    const body = document.body;
-    if (body.classList.contains('claude-force-dark')) return 'dark';
-    if (body.classList.contains('claude-force-light')) return 'default';
-    if (body.classList.contains('vscode-dark') || body.classList.contains('vscode-high-contrast')) return 'dark';
-    return 'default';
+    const c = document.body.classList;
+    if (c.contains('claude-force-dark')) return 'dark';
+    if (c.contains('claude-force-light')) return 'default';
+    return c.contains('vscode-light') || c.contains('vscode-high-contrast-light') ? 'default' : 'dark';
   }
 
-  function ensureInit(force) {
-    if (typeof mermaid === 'undefined') return false;
-    const theme = currentTheme();
-    if (!force && lastTheme === theme) return true;
-    try {
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: theme,
-        securityLevel: 'antiscript',
-        fontFamily: getComputedStyle(document.body).fontFamily,
-        themeVariables: { fontSize: '14px' },
-        flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
-        sequence: { useMaxWidth: true, wrap: true },
-        gantt: { useMaxWidth: true },
-      });
-      lastTheme = theme;
-      log('mermaid (re)initialized, theme=', theme);
-      return true;
-    } catch (e) {
-      warn('mermaid.initialize failed:', e);
-      return false;
+  function ensureInit(theme) {
+    if (initializedTheme === theme) return;
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: theme,
+      securityLevel: 'antiscript',
+      // Throw instead of drawing Mermaid's own error diagram; we show errors
+      // inline and this keeps temporary render nodes off <body>.
+      suppressErrorRendering: true,
+      fontFamily: getComputedStyle(document.body).fontFamily,
+      themeVariables: { fontSize: '14px' },
+      flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
+      sequence: { useMaxWidth: true, wrap: true },
+      gantt: { useMaxWidth: true },
+    });
+    initializedTheme = theme;
+  }
+
+  // Text is measured when a diagram is laid out, so wait (briefly) for the
+  // web fonts the labels use; otherwise boxes are sized for fallback fonts.
+  function fontsSettled() {
+    if (!fontsWait) {
+      fontsWait = document.fonts && document.fonts.ready
+        ? Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))])
+        : Promise.resolve();
     }
+    return fontsWait;
   }
 
-  const MERMAID_KEYWORDS = /^\s*(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(-v2)?|erDiagram|gantt|pie|journey|gitGraph|mindmap|timeline|quadrantChart|requirementDiagram|C4Context|C4Container|C4Component|C4Dynamic|C4Deployment|sankey|xychart-beta|block-beta|architecture-beta)\b/;
+  // ─────────────────────────────────────────────────────────────────────
+  // Block discovery
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Headers that make an unlabeled fence a Mermaid candidate. Deliberately
+  // strict — the keyword alone or with its standard options — so prose or
+  // code that merely starts with "graph" or "timeline" is left alone.
+  const HEADER_RE = /^(?:(?:graph|flowchart)(?:\s+(?:TB|TD|BT|RL|LR))?|sequenceDiagram|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie(?:\s+showData)?(?:\s+title\s.+)?|gitGraph(?:\s+(?:LR|TB|BT))?:?|mindmap|timeline|quadrantChart|requirementDiagram|C4(?:Context|Container|Component|Dynamic|Deployment)|(?:sankey|xychart|block|packet|architecture|radar|treemap)(?:-beta)?(?:\s+(?:horizontal|vertical))?|kanban)\s*;?$/;
+
+  // First meaningful line: skips blank lines, %% comments / directives and a
+  // leading `---` front-matter block.
+  function headerLine(source) {
+    const lines = source.split(/\r?\n/);
+    let i = 0;
+    while (i < lines.length && !lines[i].trim()) i++;
+    if (i < lines.length && lines[i].trim() === '---') {
+      i++;
+      while (i < lines.length && lines[i].trim() !== '---') i++;
+      i++;
+    }
+    for (; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line && !line.startsWith('%%')) return line;
+    }
+    return '';
+  }
+
+  function diagramType(source) {
+    const m = /^[A-Za-z][\w-]*/.exec(headerLine(source));
+    return m ? m[0] : 'mermaid';
+  }
 
   function findBlocks() {
-    const found = new Set();
-    document.querySelectorAll('pre > code.language-mermaid:not([data-mermaid-processed])').forEach(el => found.add(el));
-    document.querySelectorAll('pre > code:not([data-mermaid-processed])').forEach(el => {
-      if (found.has(el)) return;
-      const txt = (el.textContent || '').trim();
-      if (MERMAID_KEYWORDS.test(txt)) found.add(el);
-    });
-    return Array.from(found);
-  }
-
-  function showError(pre, code, err) {
-    const wrap = document.createElement('div');
-    wrap.setAttribute('data-mermaid-source', code);
-    wrap.className = 'mermaid-error-wrap';
-
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'mermaid-error';
-    errorDiv.textContent = 'Mermaid error: ' + (err && err.message ? err.message : String(err));
-    wrap.appendChild(errorDiv);
-
-    const sourcePre = document.createElement('pre');
-    sourcePre.className = 'mermaid-source';
-    const sourceCode = document.createElement('code');
-    sourceCode.textContent = code;
-    sourcePre.appendChild(sourceCode);
-    wrap.appendChild(sourcePre);
-
-    pre.replaceWith(wrap);
-  }
-
-  function cleanupOrphans(id) {
-    // Mermaid v10 leaves temp render containers attached to <body> on error.
-    // Remove the specific one for this id, plus any older strays.
-    if (id) {
-      const a = document.getElementById(id);
-      if (a && a.parentElement === document.body) a.remove();
-      const b = document.getElementById('d' + id);
-      if (b && b.parentElement === document.body) b.remove();
-    }
-    document.querySelectorAll('body > svg[id^="mermaid-svg-"], body > div[id^="dmermaid-svg-"], body > div[id^="mermaid-svg-"]').forEach(el => {
-      el.remove();
-    });
-  }
-
-  async function renderBlock(block) {
-    block.setAttribute('data-mermaid-processed', 'true');
-    const code = (block.textContent || '').trim();
-    const pre = block.parentElement;
-    if (!pre) return;
-
-    const id = 'mermaid-svg-' + (++renderCount) + '-' + Date.now();
-
-    // Pre-validate. parse() failures don't pollute the DOM, render() failures do.
-    if (typeof mermaid.parse === 'function') {
-      try {
-        await mermaid.parse(code);
-      } catch (err) {
-        warn('parse error', err);
-        showError(pre, code, err);
-        cleanupOrphans(id);
-        return;
+    const blocks = [];
+    document.querySelectorAll('pre > code:not([' + PROCESSED + '])').forEach((code) => {
+      const pre = code.parentElement;
+      const explicit = code.classList.contains('language-mermaid');
+      const source = (code.textContent || '').replace(/\s+$/, '');
+      if (!explicit) {
+        // Another language, VS Code's front matter block, or not a header.
+        if (/(^|\s)language-/.test(code.className) || pre.classList.contains('frontmatter')) return;
+        if (!HEADER_RE.test(headerLine(source))) return;
       }
-    }
+      blocks.push({ code, pre, source, explicit });
+    });
+    return blocks;
+  }
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Rendering (cached)
+  // ─────────────────────────────────────────────────────────────────────
+
+  function cacheKey(theme, source) { return theme + '\n' + source; }
+
+  // `click` directives get their handlers from bindFunctions, which only work
+  // for the render that produced them, so interactive diagrams aren't cached.
+  function isInteractive(source) { return /^\s*click\s/m.test(source); }
+
+  function errorMessage(err) {
+    return (err && (err.message || err.str)) || String(err);
+  }
+
+  function removeOrphans(id) {
+    for (const sel of ['#d' + id, '#i' + id, '#' + id]) {
+      const el = document.querySelector(sel);
+      if (el && el.parentElement === document.body) el.remove();
+    }
+  }
+
+  async function render(source, theme) {
+    const key = cacheKey(theme, source);
+    const hit = cache.get(key);
+    if (hit) return hit;
+    ensureInit(theme);
+    const id = 'claude-mermaid-' + (++renderSeq);
+    let entry;
     try {
-      const result = await mermaid.render(id, code);
-      const svg = result && result.svg ? result.svg : result;
-      const bind = result && result.bindFunctions;
-
-      const container = buildMermaidContainer(svg, code);
-      pre.replaceWith(container);
-      const canvas = container.querySelector('.md-mermaid-canvas');
-      if (typeof bind === 'function' && canvas) bind(canvas);
+      const result = await mermaid.render(id, source);
+      entry = { svg: result.svg, bind: result.bindFunctions };
     } catch (err) {
-      warn('render error', err);
-      cleanupOrphans(id);
-      showError(pre, code, err);
+      entry = { error: errorMessage(err) };
+    } finally {
+      removeOrphans(id);
+    }
+    if (entry.error || !isInteractive(source)) {
+      if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
+      cache.set(key, { svg: entry.svg, error: entry.error });
+    }
+    return entry;
+  }
+
+  // The <pre> itself becomes the card, with the source <code> kept (hidden)
+  // inside it. VS Code's morphdom update can then match it one-to-one instead
+  // of rebuilding the rest of the document, and scroll sync keeps working
+  // (VS Code maps a fenced <code data-line> to its parent <pre>).
+  function place(block, entry, theme) {
+    const { pre, code } = block;
+    if (!pre.isConnected || code.parentElement !== pre) return;
+    if (entry.error && !block.explicit) {
+      // An unlabeled fence that only looked like Mermaid: leave it as code.
+      code.setAttribute(PROCESSED, 'skip');
+      return;
+    }
+    // A sniffed fence may already carry enhance.js's code-block chrome.
+    pre.querySelectorAll(':scope > .md-code-chrome').forEach((el) => el.remove());
+    pre.classList.remove('md-code');
+    pre.removeAttribute('data-claude-enhanced');
+    code.setAttribute(PROCESSED, entry.error ? 'error' : 'card');
+    fill(pre, code, entry, block.source, theme);
+  }
+
+  function retheme(pre, entry, theme) {
+    const code = pre.querySelector(':scope > code');
+    if (!pre.isConnected || !code) return;
+    fill(pre, code, entry, pre.getAttribute('data-mermaid-source'), theme);
+  }
+
+  function fill(pre, code, entry, source, theme) {
+    pre.querySelectorAll(':scope > .md-mermaid-bar, :scope > .md-mermaid-canvas, :scope > .mermaid-error')
+      .forEach((el) => el.remove());
+    pre.setAttribute('data-mermaid-source', source);
+    if (entry.error) {
+      pre.classList.remove('md-mermaid');
+      pre.classList.add('md-mermaid-error');
+      pre.removeAttribute('data-mermaid-theme');
+      pre.insertBefore(buildError(entry.error), code);
+      return;
+    }
+    pre.classList.remove('md-mermaid-error');
+    pre.classList.add('md-mermaid');
+    pre.setAttribute('data-mermaid-theme', theme);
+    pre.setAttribute('role', 'figure');
+    pre.setAttribute('aria-label', diagramType(source) + ' diagram');
+    const { bar, canvas } = buildCard(entry.svg, source);
+    pre.insertBefore(bar, code);
+    pre.insertBefore(canvas, code);
+    if (entry.bind) {
+      try { entry.bind(canvas); } catch (err) { warn('bindFunctions failed', err); }
+    }
+  }
+
+  function staleCards(theme) {
+    return Array.from(document.querySelectorAll('pre.md-mermaid[data-mermaid-source]'))
+      .filter((pre) => pre.getAttribute('data-mermaid-theme') !== theme);
+  }
+
+  // Swap in everything already cached for the current theme. Synchronous, so
+  // a morphdom update never gets painted with raw diagram sources.
+  function syncPass() {
+    if (!mermaidReady() || !document.body) return;
+    const theme = currentTheme();
+    let pending = false;
+    for (const block of findBlocks()) {
+      const hit = cache.get(cacheKey(theme, block.source));
+      if (hit) place(block, hit, theme); else pending = true;
+    }
+    for (const card of staleCards(theme)) {
+      const hit = cache.get(cacheKey(theme, card.getAttribute('data-mermaid-source')));
+      if (hit) retheme(card, hit, theme); else pending = true;
+    }
+    observer.takeRecords();
+    if (pending) renderPending();
+  }
+
+  // Render whatever syncPass couldn't, one diagram at a time (Mermaid keeps
+  // global state). Re-runs if new work arrives while rendering.
+  async function renderPending() {
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      await fontsSettled();
+      do {
+        again = false;
+        const theme = currentTheme();
+        for (const block of findBlocks()) {
+          const entry = await render(block.source, theme);
+          if (theme !== currentTheme()) { again = true; break; }
+          place(block, entry, theme);
+        }
+        if (again) continue;
+        for (const card of staleCards(theme)) {
+          const entry = await render(card.getAttribute('data-mermaid-source'), theme);
+          if (theme !== currentTheme()) { again = true; break; }
+          retheme(card, entry, theme);
+        }
+      } while (again);
+    } catch (err) {
+      warn('render pass failed', err);
+    } finally {
+      busy = false;
     }
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Container with toolbar (zoom in/out/reset, copy SVG, fullscreen)
+  // Card with toolbar (zoom in/out/reset, copy SVG, fullscreen)
   // ─────────────────────────────────────────────────────────────────────
 
-  const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.2;
+  const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25;
 
-  const TOOLBAR_ICONS = {
-    zoomIn:  '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="4"/><path d="m9 9 4 4M4 6h4M6 4v4" stroke-linecap="round"/></svg>',
-    zoomOut: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="4"/><path d="m9 9 4 4M4 6h4" stroke-linecap="round"/></svg>',
-    reset:   '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M11.5 7a4.5 4.5 0 1 1-1.3-3.2" stroke-linecap="round"/><path d="M11.5 1.5v3h-3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    copy:    '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="4" y="4" width="7" height="7" rx="1.2"/><path d="M4 8.5V3.5A.5.5 0 0 1 4.5 3h5"/></svg>',
-    full:    '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 5.2V2h3.2M11.8 2H9v.2M2 8.8V11h3.2M8.8 12H12V8.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    close:   '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m3.5 3.5 7 7M10.5 3.5l-7 7" stroke-linecap="round"/></svg>',
+  const ICONS = {
+    zoomIn:  '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="6" cy="6" r="4"/><path d="m9 9 4 4M4 6h4M6 4v4" stroke-linecap="round"/></svg>',
+    zoomOut: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="6" cy="6" r="4"/><path d="m9 9 4 4M4 6h4" stroke-linecap="round"/></svg>',
+    reset:   '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M11.5 7a4.5 4.5 0 1 1-1.3-3.2" stroke-linecap="round"/><path d="M11.5 1.5v3h-3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    copy:    '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.2"/><path d="M4 8.5V3.5A.5.5 0 0 1 4.5 3h5"/></svg>',
+    full:    '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2 5.2V2h3.2M11.8 2H9v.2M2 8.8V11h3.2M8.8 12H12V8.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    close:   '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="m3.5 3.5 7 7M10.5 3.5l-7 7" stroke-linecap="round"/></svg>',
   };
-
-  function buildMermaidContainer(svg, code) {
-    const wrap = document.createElement('div');
-    wrap.className = 'md-mermaid';
-    wrap.setAttribute('data-mermaid-source', code);
-
-    const bar = document.createElement('div');
-    bar.className = 'md-mermaid-bar';
-    const label = document.createElement('span');
-    label.className = 'md-mermaid-label';
-    label.textContent = detectMermaidType(code);
-    bar.appendChild(label);
-
-    const actions = document.createElement('div');
-    actions.className = 'md-mermaid-actions';
-
-    const canvas = document.createElement('div');
-    canvas.className = 'md-mermaid-canvas';
-    canvas.innerHTML = svg;
-
-    let zoom = 1;
-    function applyZoom() {
-      canvas.style.transform = 'scale(' + zoom.toFixed(2) + ')';
-    }
-
-    const btnZoomOut = makeBtn('Zoom out', TOOLBAR_ICONS.zoomOut, () => {
-      zoom = Math.max(ZOOM_MIN, +(zoom - ZOOM_STEP).toFixed(2));
-      applyZoom();
-    });
-    const btnZoomIn = makeBtn('Zoom in', TOOLBAR_ICONS.zoomIn, () => {
-      zoom = Math.min(ZOOM_MAX, +(zoom + ZOOM_STEP).toFixed(2));
-      applyZoom();
-    });
-    const btnReset = makeBtn('Reset zoom', TOOLBAR_ICONS.reset, () => {
-      zoom = 1; applyZoom();
-    });
-    const btnCopy = makeBtn('Copy SVG', TOOLBAR_ICONS.copy, () => {
-      copyTextSafe(svg).then(() => flashBtn(btnCopy));
-    });
-    const btnFull = makeBtn('Fullscreen', TOOLBAR_ICONS.full, () => {
-      openFullscreen(svg, code);
-    });
-
-    actions.appendChild(btnZoomOut);
-    actions.appendChild(btnZoomIn);
-    actions.appendChild(btnReset);
-    actions.appendChild(btnCopy);
-    actions.appendChild(btnFull);
-    bar.appendChild(actions);
-
-    wrap.appendChild(bar);
-    wrap.appendChild(canvas);
-    return wrap;
-  }
 
   function makeBtn(title, iconHtml, onClick) {
     const b = document.createElement('button');
@@ -200,201 +289,258 @@
     return b;
   }
 
-  function flashBtn(btn) {
-    btn.style.color = 'var(--md-accent)';
-    btn.style.background = 'var(--md-accent-bg)';
-    setTimeout(() => { btn.style.color = ''; btn.style.background = ''; }, 1200);
-  }
-
-  function detectMermaidType(code) {
-    const m = /^\s*(\w[\w-]*)/.exec(code || '');
-    return m ? m[1] : 'mermaid';
-  }
-
-  function copyTextSafe(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
-    }
-    return Promise.resolve(fallbackCopy(text));
-  }
-  function fallbackCopy(text) {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      document.execCommand('copy'); ta.remove();
-      return true;
-    } catch (_) { return false; }
-  }
-
-  const FS_ZOOM_MIN = 0.4, FS_ZOOM_MAX = 6, FS_ZOOM_FACTOR = 1.2;
-
-  function openFullscreen(svg, code) {
-    const overlay = document.createElement('div');
-    overlay.className = 'md-mermaid-overlay';
-
+  function makeBar(text) {
     const bar = document.createElement('div');
     bar.className = 'md-mermaid-bar';
     const label = document.createElement('span');
     label.className = 'md-mermaid-label';
-    label.textContent = detectMermaidType(code) + ' · fullscreen';
+    label.textContent = text;
     bar.appendChild(label);
+    const actions = document.createElement('div');
+    actions.className = 'md-mermaid-actions';
+    bar.appendChild(actions);
+    return { bar, actions };
+  }
 
+  // Local CSS px per viewport px. Pointer coordinates and bounding rects are
+  // in viewport px, while sizes and transforms apply inside the (possibly
+  // page-zoomed) body.
+  function localScale(el) {
+    const w = el.getBoundingClientRect().width;
+    return w ? el.clientWidth / w : 1;
+  }
+
+  // Toolbar + canvas for a card (fill() puts them into the <pre>).
+  function buildCard(svg, source) {
+    const { bar, actions } = makeBar(diagramType(source));
+    const canvas = document.createElement('div');
+    canvas.className = 'md-mermaid-canvas';
+    canvas.innerHTML = svg;
+
+    // Zoom resizes the SVG itself (not a transform on the canvas), so the
+    // card grows and scrolls instead of clipping the diagram.
+    const svgEl = canvas.querySelector('svg');
+    const originalStyle = svgEl ? svgEl.getAttribute('style') : null;
+    let zoom = 1;
+    let baseWidth = 0;
+    function setZoom(next) {
+      next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+      if (!svgEl || next === zoom) return;
+      if (!baseWidth) baseWidth = svgEl.getBoundingClientRect().width * localScale(canvas);
+      zoom = next;
+      if (zoom === 1) {
+        if (originalStyle === null) svgEl.removeAttribute('style');
+        else svgEl.setAttribute('style', originalStyle);
+      } else {
+        svgEl.style.maxWidth = 'none';
+        svgEl.style.width = Math.round(baseWidth * zoom) + 'px';
+      }
+    }
+
+    const copyBtn = makeBtn('Copy SVG', ICONS.copy, () => {
+      copyText(svg).then((ok) => { if (ok) flash(copyBtn); });
+    });
+    actions.append(
+      makeBtn('Zoom out', ICONS.zoomOut, () => setZoom(zoom - ZOOM_STEP)),
+      makeBtn('Zoom in', ICONS.zoomIn, () => setZoom(zoom + ZOOM_STEP)),
+      makeBtn('Reset zoom', ICONS.reset, () => setZoom(1)),
+      copyBtn,
+      makeBtn('Fullscreen', ICONS.full, () => openFullscreen(svg, source)),
+    );
+
+    return { bar, canvas };
+  }
+
+  // Error banner shown above the (still visible) source of an invalid block.
+  function buildError(message) {
+    const head = document.createElement('div');
+    head.className = 'mermaid-error';
+    head.setAttribute('role', 'note');
+    head.textContent = 'Mermaid error: ' + message;
+    return head;
+  }
+
+  function flash(btn) {
+    btn.classList.add('is-done');
+    setTimeout(() => btn.classList.remove('is-done'), 1200);
+  }
+
+  // Resolves to whether the text reached the clipboard.
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(() => true, () => fallbackCopy(text));
+    }
+    return Promise.resolve(fallbackCopy(text));
+  }
+
+  function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Fullscreen view with wheel / pinch zoom and drag panning
+  // ─────────────────────────────────────────────────────────────────────
+
+  const FS_ZOOM_MIN = 0.4, FS_ZOOM_MAX = 6, FS_ZOOM_FACTOR = 1.2;
+
+  function openFullscreen(svg, source) {
+    if (document.querySelector('.md-mermaid-overlay')) return;
+    const previousFocus = document.activeElement;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'md-mermaid-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', diagramType(source) + ' diagram');
+
+    const { bar, actions } = makeBar(diagramType(source) + ' · fullscreen');
     const canvas = document.createElement('div');
     canvas.className = 'md-mermaid-canvas';
     canvas.innerHTML = svg;
     const svgEl = canvas.querySelector('svg');
     if (svgEl) svgEl.style.transformOrigin = 'center center';
 
-    // Pan + zoom state. The SVG keeps its flex-centered layout position;
-    // we transform it on top of that. `C` (the canvas center) stays constant
-    // because transforms don't affect layout, so cursor-anchored zoom math
-    // can read it fresh on each event.
+    // The SVG stays flex-centered; pan + zoom are a transform on top of that,
+    // so the canvas center is a fixed anchor for cursor-anchored zoom.
     let zoom = 1, panX = 0, panY = 0;
-    function applyTransform() {
-      if (svgEl) svgEl.style.transform =
-        'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom.toFixed(3) + ')';
+    function apply() {
+      if (svgEl) svgEl.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom.toFixed(3) + ')';
     }
-
-    // Zoom toward (mx, my) in viewport coords, keeping that point fixed.
-    function zoomTo(nextZoom, mx, my) {
-      nextZoom = Math.min(FS_ZOOM_MAX, Math.max(FS_ZOOM_MIN, nextZoom));
-      if (nextZoom === zoom) return;
+    // Zoom toward viewport point (mx, my), keeping that point fixed.
+    function zoomTo(next, mx, my) {
+      next = Math.min(FS_ZOOM_MAX, Math.max(FS_ZOOM_MIN, next));
+      if (next === zoom) return;
       const rect = canvas.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const ratio = nextZoom / zoom;
-      panX = (mx - cx) - ratio * ((mx - cx) - panX);
-      panY = (my - cy) - ratio * ((my - cy) - panY);
-      zoom = nextZoom;
-      applyTransform();
+      const k = localScale(canvas);
+      const dx = (mx - (rect.left + rect.width / 2)) * k;
+      const dy = (my - (rect.top + rect.height / 2)) * k;
+      const ratio = next / zoom;
+      panX = dx - ratio * (dx - panX);
+      panY = dy - ratio * (dy - panY);
+      zoom = next;
+      apply();
     }
-    function zoomFromCenter(nextZoom) {
+    function zoomFromCenter(next) {
       const rect = canvas.getBoundingClientRect();
-      zoomTo(nextZoom, rect.left + rect.width / 2, rect.top + rect.height / 2);
+      zoomTo(next, rect.left + rect.width / 2, rect.top + rect.height / 2);
     }
+    function reset() { zoom = 1; panX = 0; panY = 0; apply(); }
 
-    function onWheel(e) {
+    // Proportional to the wheel delta, so a trackpad pinch (a stream of
+    // small ctrlKey wheel events) zooms smoothly and a mouse notch ~1.2×.
+    canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const factor = e.deltaY < 0 ? FS_ZOOM_FACTOR : 1 / FS_ZOOM_FACTOR;
-      zoomTo(zoom * factor, e.clientX, e.clientY);
-    }
+      const px = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      zoomTo(zoom * Math.exp(-px / 550), e.clientX, e.clientY);
+    }, { passive: false });
 
-    let dragging = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
-    function onDown(e) {
+    let drag = null;
+    canvas.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      dragging = true;
-      startX = e.clientX; startY = e.clientY;
-      startPanX = panX; startPanY = panY;
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, panX: panX, panY: panY, k: localScale(canvas) };
+      canvas.setPointerCapture(e.pointerId);
       canvas.classList.add('is-grabbing');
       e.preventDefault();
-    }
-    function onMove(e) {
-      if (!dragging) return;
-      panX = startPanX + (e.clientX - startX);
-      panY = startPanY + (e.clientY - startY);
-      applyTransform();
-    }
-    function onUp() {
-      if (!dragging) return;
-      dragging = false;
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      panX = drag.panX + (e.clientX - drag.x) * drag.k;
+      panY = drag.panY + (e.clientY - drag.y) * drag.k;
+      apply();
+    });
+    function endDrag(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag = null;
       canvas.classList.remove('is-grabbing');
     }
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
 
     function close() {
       overlay.remove();
-      document.removeEventListener('keydown', onKey);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      document.removeEventListener('keydown', onKey, true);
+      if (previousFocus && previousFocus.focus) previousFocus.focus({ preventScroll: true });
     }
-    function onKey(e) { if (e.key === 'Escape') close(); }
+    function onKey(e) {
+      let handled = true;
+      if (e.key === 'Escape') close();
+      else if (e.ctrlKey || e.metaKey || e.altKey) handled = false;
+      else if (e.key === '+' || e.key === '=') zoomFromCenter(zoom * FS_ZOOM_FACTOR);
+      else if (e.key === '-' || e.key === '_') zoomFromCenter(zoom / FS_ZOOM_FACTOR);
+      else if (e.key === '0') reset();
+      else handled = false;
+      if (handled) {
+        // Keep VS Code (which receives every webview keydown) out of it.
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
 
-    const actions = document.createElement('div');
-    actions.className = 'md-mermaid-actions';
-    actions.appendChild(makeBtn('Zoom out', TOOLBAR_ICONS.zoomOut, () => zoomFromCenter(zoom / FS_ZOOM_FACTOR)));
-    actions.appendChild(makeBtn('Zoom in', TOOLBAR_ICONS.zoomIn, () => zoomFromCenter(zoom * FS_ZOOM_FACTOR)));
-    actions.appendChild(makeBtn('Reset zoom', TOOLBAR_ICONS.reset, () => {
-      zoom = 1; panX = 0; panY = 0; applyTransform();
-    }));
-    actions.appendChild(makeBtn('Close (Esc)', TOOLBAR_ICONS.close, close));
-    bar.appendChild(actions);
+    const closeBtn = makeBtn('Close (Esc)', ICONS.close, close);
+    actions.append(
+      makeBtn('Zoom out', ICONS.zoomOut, () => zoomFromCenter(zoom / FS_ZOOM_FACTOR)),
+      makeBtn('Zoom in', ICONS.zoomIn, () => zoomFromCenter(zoom * FS_ZOOM_FACTOR)),
+      makeBtn('Reset zoom', ICONS.reset, reset),
+      closeBtn,
+    );
 
-    overlay.appendChild(bar);
-    overlay.appendChild(canvas);
+    overlay.append(bar, canvas);
     document.body.appendChild(overlay);
-
-    canvas.addEventListener('wheel', onWheel, { passive: false });
-    canvas.addEventListener('mousedown', onDown);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
+    closeBtn.focus({ preventScroll: true });
   }
 
-  async function renderAll() {
-    if (!ensureInit(false)) return;
-    cleanupOrphans();
-    const blocks = findBlocks();
-    if (blocks.length === 0) return;
-    log('rendering', blocks.length, 'block(s)');
-    for (const block of blocks) await renderBlock(block);
-    cleanupOrphans();
-  }
+  // ─────────────────────────────────────────────────────────────────────
+  // Wiring
+  // ─────────────────────────────────────────────────────────────────────
 
-  async function rerenderAll() {
-    if (!ensureInit(true)) return;
-    const containers = document.querySelectorAll('.md-mermaid[data-mermaid-source], .mermaid-rendered[data-mermaid-source], .mermaid-error-wrap[data-mermaid-source]');
-    if (containers.length === 0) {
-      renderAll();
-      return;
-    }
-    log('re-rendering', containers.length, 'block(s) for theme change');
-    containers.forEach((el) => {
-      const code = el.getAttribute('data-mermaid-source') || '';
-      const pre = document.createElement('pre');
-      const codeEl = document.createElement('code');
-      codeEl.className = 'language-mermaid';
-      codeEl.textContent = code;
-      pre.appendChild(codeEl);
-      el.replaceWith(pre);
-    });
-    cleanupOrphans();
-    await renderAll();
-  }
-
-  function schedule() {
-    if (schedule._pending) return;
-    schedule._pending = true;
-    setTimeout(() => { schedule._pending = false; renderAll(); }, 60);
-  }
-
-  function waitForMermaidThenRender(retries) {
-    if (typeof mermaid !== 'undefined') { renderAll(); return; }
-    if (retries <= 0) { warn('mermaid did not load'); return; }
-    setTimeout(() => waitForMermaidThenRender(retries - 1), 50);
-  }
-
-  log('init script loaded, readyState=', document.readyState);
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => waitForMermaidThenRender(40));
-  } else {
-    waitForMermaidThenRender(40);
-  }
-
-  document.addEventListener('claude-theme-change', () => {
-    log('theme change detected');
-    rerenderAll();
-  });
-
-  const observer = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      for (const node of m.addedNodes) {
-        if (node.nodeType !== 1) continue;
-        if (node.matches && node.matches('pre, code')) { schedule(); return; }
-        if (node.querySelector && node.querySelector('pre code')) { schedule(); return; }
+  const observer = new MutationObserver((records) => {
+    if (!mermaidReady()) return;
+    for (const r of records) {
+      for (const node of r.addedNodes) {
+        if (node.nodeType === 1 && (node.matches('pre, code') || node.querySelector('pre > code'))) {
+          syncPass();
+          return;
+        }
       }
     }
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+
+  // previewScripts load `async`, so mermaid.min.js may still be downloading
+  // (large file; slow on remote setups). Wait for its load event rather than
+  // giving up after a fixed number of polls.
+  function whenMermaidLoaded(callback) {
+    if (mermaidReady()) { callback(); return; }
+    const script = Array.from(document.scripts)
+      .find((s) => SCRIPT_DIR && s.src.split(/[?#]/)[0] === SCRIPT_DIR + 'mermaid.min.js');
+    if (script) {
+      script.addEventListener('load', () => {
+        if (mermaidReady()) callback(); else warn('mermaid.min.js loaded without defining `mermaid`');
+      }, { once: true });
+      script.addEventListener('error', () => warn('mermaid.min.js failed to load'), { once: true });
+      return;
+    }
+    let delay = 50, waited = 0;
+    (function poll() {
+      if (mermaidReady()) { callback(); return; }
+      if (waited >= 30000) { warn('mermaid did not load'); return; }
+      waited += delay;
+      setTimeout(poll, delay);
+      delay = Math.min(delay * 2, 1000);
+    })();
+  }
+
+  observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  window.addEventListener('vscode.markdown.updateContent', syncPass);
+  document.addEventListener('claude-theme-change', syncPass);
+  whenMermaidLoaded(syncPass);
 })();

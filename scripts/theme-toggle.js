@@ -1,3 +1,12 @@
+// Claude Style Markdown Preview — Auto / Light / Dark theme toggle
+// Runs in the VS Code markdown preview webview.
+//
+// Light / Dark force the palette with `claude-force-light` /
+// `claude-force-dark` on <body> (persisted in localStorage); Auto follows the
+// VS Code theme. Dispatches `claude-theme-change` on <document> whenever the
+// effective theme changes — from the toggle or from a VS Code theme switch —
+// so mermaid-init.js can re-theme diagrams.
+
 (function () {
   const STORAGE_KEY = 'claude-md-theme-mode';
   const MODES = ['auto', 'light', 'dark'];
@@ -10,6 +19,8 @@
     dark:  '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9.5 7.2A4 4 0 0 1 4.8 2.5a4 4 0 1 0 4.7 4.7z" fill="currentColor"/></svg>',
   };
 
+  let lastEffective = null;
+
   function getMode() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -18,29 +29,40 @@
     return 'auto';
   }
 
+  // VS Code tags High Contrast Light with both `vscode-high-contrast-light`
+  // and (for backwards compatibility) `vscode-high-contrast`, so the light
+  // classes have to be checked before falling back to dark.
   function getEffectiveTheme() {
     const body = document.body;
+    if (!body) return 'dark';
     if (body.classList.contains('claude-force-dark')) return 'dark';
     if (body.classList.contains('claude-force-light')) return 'light';
-    if (body.classList.contains('vscode-light')) return 'light';
+    if (body.classList.contains('vscode-light') || body.classList.contains('vscode-high-contrast-light')) return 'light';
     return 'dark';
+  }
+
+  function notifyIfChanged() {
+    const effective = getEffectiveTheme();
+    if (effective === lastEffective) return;
+    lastEffective = effective;
+    try {
+      document.dispatchEvent(new CustomEvent('claude-theme-change', {
+        detail: { mode: getMode(), effective: effective },
+      }));
+    } catch (_) {}
   }
 
   function applyMode(mode) {
     const body = document.body;
     if (!body) return;
-    body.classList.remove('claude-force-light', 'claude-force-dark');
-    if (mode === 'light') body.classList.add('claude-force-light');
-    if (mode === 'dark') body.classList.add('claude-force-dark');
+    body.classList.toggle('claude-force-light', mode === 'light');
+    body.classList.toggle('claude-force-dark', mode === 'dark');
     updateButtons();
-    try {
-      document.dispatchEvent(new CustomEvent('claude-theme-change', {
-        detail: { mode: mode, effective: getEffectiveTheme() }
-      }));
-    } catch (_) {}
+    notifyIfChanged();
   }
 
   function setMode(mode) {
+    if (MODES.indexOf(mode) < 0) return;
     try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
     applyMode(mode);
   }
@@ -58,8 +80,7 @@
   }
 
   function buildToggle() {
-    if (document.querySelector('.md-theme-toggle')) return;
-    if (!document.body) return;
+    if (!document.body || document.querySelector('.md-theme-toggle')) return;
 
     const root = document.createElement('div');
     root.className = 'md-theme-toggle';
@@ -76,19 +97,15 @@
       btn.innerHTML =
         '<span class="md-tt-icon" aria-hidden="true">' + ICONS[m] + '</span>' +
         '<span class="md-tt-label">' + LABELS[m] + '</span>';
-      btn.addEventListener('click', function () { setMode(m); });
-      btn.addEventListener('keydown', function (e) {
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-          e.preventDefault();
-          const next = MODES[(MODES.indexOf(m) + 1) % MODES.length];
-          setMode(next);
-          focusByMode(next);
-        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-          e.preventDefault();
-          const prev = MODES[(MODES.indexOf(m) - 1 + MODES.length) % MODES.length];
-          setMode(prev);
-          focusByMode(prev);
-        }
+      btn.addEventListener('click', () => setMode(m));
+      btn.addEventListener('keydown', (e) => {
+        const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1
+          : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+        if (!step) return;
+        e.preventDefault();
+        const next = MODES[(MODES.indexOf(m) + step + MODES.length) % MODES.length];
+        setMode(next);
+        focusByMode(next);
       });
       root.appendChild(btn);
     });
@@ -105,26 +122,28 @@
   function ready() {
     applyMode(getMode());
     buildToggle();
+
+    // VS Code swaps the vscode-* theme classes on <body> when the color theme
+    // changes (other classes are left alone): re-check the effective theme,
+    // and keep the forced class and the toggle in place defensively.
+    new MutationObserver(() => {
+      const mode = getMode();
+      const body = document.body;
+      if (body.classList.contains('claude-force-light') !== (mode === 'light') ||
+          body.classList.contains('claude-force-dark') !== (mode === 'dark')) {
+        applyMode(mode);
+      } else {
+        notifyIfChanged();
+      }
+      if (!document.querySelector('.md-theme-toggle')) buildToggle();
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'], childList: true });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', ready);
-  } else {
+  if (document.body) {
     ready();
+  } else {
+    document.addEventListener('DOMContentLoaded', ready);
   }
-
-  // VS Code rerenders body content on edits — keep state alive
-  const observer = new MutationObserver(() => {
-    if (!document.body) return;
-    const mode = getMode();
-    const body = document.body;
-    const needsLight = mode === 'light' && !body.classList.contains('claude-force-light');
-    const needsDark = mode === 'dark' && !body.classList.contains('claude-force-dark');
-    const needsClear = mode === 'auto' && (body.classList.contains('claude-force-light') || body.classList.contains('claude-force-dark'));
-    if (needsLight || needsDark || needsClear) applyMode(mode);
-    if (!document.querySelector('.md-theme-toggle')) buildToggle();
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
 
   window.claudeMdTheme = { getMode: getMode, setMode: setMode, getEffectiveTheme: getEffectiveTheme };
 })();

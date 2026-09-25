@@ -1,26 +1,35 @@
 // Claude Style Markdown Preview — DOM enhancements
-// Runs in the VS Code markdown preview webview after VS Code renders the body.
+// Runs in the VS Code markdown preview webview.
 //
-// Adds: heading anchor links · code-block chrome (lang pill + copy button) ·
-//       admonitions (GitHub-flavored [!NOTE] etc.) · reading progress bar ·
-//       click-to-zoom images · floating TOC sidebar.
+// Adds: heading anchor links · code-block chrome (language pill + copy
+//       button) with Claude-themed syntax highlighting · admonitions
+//       (GitHub-flavored [!NOTE] etc.) · reading progress bar ·
+//       click-to-zoom images and captioned figures · floating TOC sidebar.
 //
-// Defensive against VS Code's body re-renders on every edit:
-// MutationObserver re-applies enhancements idempotently to new content.
+// VS Code patches the rendered markdown in place (morphdom) on every edit,
+// which strips these enhancements from any element it touches, and then
+// fires `vscode.markdown.updateContent`. Everything is re-applied
+// synchronously in that event — before the next paint — so edits never flash
+// un-enhanced content. A MutationObserver covers the initial load. Every
+// enhancement is idempotent.
 
 (function () {
   const PROCESSED = 'data-claude-enhanced';
-  let scheduled = false;
+  const SCRIPT_DIR = ((document.currentScript && document.currentScript.src) || '').replace(/[^/]*$/, '');
+
+  function contentRoot() {
+    return document.querySelector('.markdown-body') || document.body;
+  }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Heading anchors — ¶ icon on hover, click to copy #id
+  // Heading anchors — ¶ icon on hover, click to copy the #fragment
   // ─────────────────────────────────────────────────────────────────────
 
   function slugify(text) {
     return String(text)
       .toLowerCase()
       .trim()
-      .replace(/[\s ]+/g, '-')
+      .replace(/[\s ]+/g, '-')
       .replace(/[^\p{Letter}\p{Number}\-_]+/gu, '')
       .replace(/^-+|-+$/g, '')
       .slice(0, 80) || 'section';
@@ -35,129 +44,124 @@
     return id;
   }
 
-  function enhanceHeadings() {
-    const used = new Set();
-    document.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]').forEach(h => used.add(h.id));
+  function headingText(h) {
+    const clone = h.cloneNode(true);
+    clone.querySelectorAll('.md-anchor').forEach((a) => a.remove());
+    return (clone.textContent || '').trim();
+  }
 
-    document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
+  function enhanceHeadings(root) {
+    const headings = Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+      .filter((h) => !h.closest('.md-mermaid'));
+    const used = new Set(headings.filter((h) => h.id).map((h) => h.id));
+
+    headings.forEach((h) => {
       if (h.hasAttribute(PROCESSED)) return;
       h.setAttribute(PROCESSED, 'h');
-
-      if (!h.id) {
-        const text = (h.textContent || '').trim();
-        h.id = ensureUniqueId(slugify(text), used);
-      } else {
-        used.add(h.id);
-      }
+      // VS Code assigns GitHub-style ids; this only covers raw-HTML headings.
+      if (!h.id) h.id = ensureUniqueId(slugify(headingText(h)), used);
 
       const a = document.createElement('a');
       a.className = 'md-anchor';
       a.href = '#' + h.id;
-      a.setAttribute('aria-label', 'Copy link to ' + (h.textContent || '').trim());
-      a.title = 'Click to copy link';
+      a.title = 'Copy link to this section';
+      a.setAttribute('aria-label', 'Copy link to section: ' + headingText(h));
       a.textContent = '¶';
-      a.addEventListener('click', function (e) {
+      a.addEventListener('click', (e) => {
         e.preventDefault();
-        const url = location.href.split('#')[0] + '#' + h.id;
-        copyText(url).then(function () {
-          a.classList.add('is-copied');
-          setTimeout(function () { a.classList.remove('is-copied'); }, 1400);
-        });
-        if (history.replaceState) history.replaceState(null, '', '#' + h.id);
+        // The webview's own URL is meaningless outside the preview; the
+        // fragment is what a markdown link needs: [text](#section).
+        copyText('#' + h.id).then((ok) => { if (ok) flash(a, 'is-copied'); });
       });
       h.appendChild(a);
     });
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Code blocks — wrap in chrome with language pill + copy button
+  // Code blocks — chrome with language pill + copy button, highlighting
   // ─────────────────────────────────────────────────────────────────────
 
-  // Skip mermaid (handled by mermaid-init.js) and already-wrapped blocks.
-  function isMermaidBlock(code) {
-    if (code.classList.contains('language-mermaid')) return true;
-    if (code.hasAttribute('data-mermaid-processed')) return true;
-    const txt = (code.textContent || '').trim();
-    return /^\s*(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(-v2)?|erDiagram|gantt|pie|journey|gitGraph|mindmap|timeline|quadrantChart|sankey|xychart-beta|block-beta)\b/.test(txt);
-  }
+  const COPY_ICON = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3" y="3" width="6.5" height="6.5" rx="1"/><path d="M3 7.5V2.5A.5.5 0 0 1 3.5 2h5"/></svg>';
+  const HL_CACHE_MAX = 200;
+  const hlCache = new Map(); // language + '\n' + source -> highlighted HTML
 
   function detectLanguage(code) {
     for (const cls of code.classList) {
       const m = /^language-(\S+)$/.exec(cls);
       if (m) return m[1];
     }
-    const dl = code.getAttribute('data-language');
-    if (dl) return dl;
-    return '';
+    return code.getAttribute('data-language') || '';
   }
 
-  // Syntax-highlight a <code> with our bundled highlight.js, but ONLY when the
-  // fence specifies a language highlight.js recognizes. We deliberately do not
-  // auto-detect: highlightAuto misfires on plain-text / ASCII-diagram blocks
-  // (e.g. tagging them as SCSS), so unlabeled blocks are left as plain text.
-  // We re-highlight from the raw textContent so the result is consistent and
-  // themed by our --md-hl-* palette whether or not VS Code already ran.
-  function highlightCode(code, lang) {
-    if (typeof hljs === 'undefined' || code.hasAttribute('data-claude-hl')) return;
+  // Highlight with the bundled highlight.js, but only when the fence names a
+  // language it knows. No auto-detection: highlightAuto misfires on plain
+  // text / ASCII diagrams. Re-highlighting from textContent keeps the output
+  // consistent (and themed by --md-hl-*) whether or not VS Code highlighted.
+  // Results are cached because VS Code re-creates blocks on every edit.
+  function highlightCode(code) {
+    if (code.hasAttribute('data-claude-hl') || typeof hljs === 'undefined') return;
+    const lang = detectLanguage(code);
     if (!lang || !hljs.getLanguage(lang)) return;
     const raw = code.textContent || '';
-    try {
-      const result = hljs.highlight(raw, { language: lang, ignoreIllegals: true });
-      code.innerHTML = result.value;
-      code.classList.add('hljs');
-      code.setAttribute('data-claude-hl', '1');
-    } catch (_) {
-      /* leave as plain text */
+    const key = lang + '\n' + raw;
+    let html = hlCache.get(key);
+    if (html === undefined) {
+      try {
+        html = hljs.highlight(raw, { language: lang, ignoreIllegals: true }).value;
+      } catch (_) {
+        return; // leave as-is
+      }
+      if (hlCache.size >= HL_CACHE_MAX) hlCache.delete(hlCache.keys().next().value);
+      hlCache.set(key, html);
     }
+    code.innerHTML = html;
+    code.classList.add('hljs');
+    code.setAttribute('data-claude-hl', '1');
   }
 
-  function enhanceCodeBlocks() {
-    document.querySelectorAll('pre > code').forEach((code) => {
+  // The chrome bar goes *inside* the <pre> (which becomes the card) rather
+  // than in a wrapper: VS Code's morphdom update can then match the <pre>
+  // one-to-one, instead of rebuilding everything after the first wrapped
+  // block on every edit (which also collapsed open <details>, restarted
+  // media, and cost ~50 ms per edit on long documents).
+  function enhanceCodeBlocks(root) {
+    root.querySelectorAll('pre > code').forEach((code) => {
       const pre = code.parentElement;
-      if (!pre || pre.hasAttribute(PROCESSED)) return;
-      if (pre.parentElement && pre.parentElement.classList.contains('md-code-wrap')) {
+      // mermaid-init.js owns ```mermaid fences and turns them into cards.
+      if (code.classList.contains('language-mermaid') || pre.matches('.md-mermaid, .md-mermaid-error')) return;
+      if (!pre.hasAttribute(PROCESSED)) {
         pre.setAttribute(PROCESSED, 'pre');
-        return;
+        pre.classList.add('md-code');
+        pre.insertBefore(buildChrome(pre, code), pre.firstChild);
       }
-      if (isMermaidBlock(code)) return;
-      pre.setAttribute(PROCESSED, 'pre');
-
-      const lang = detectLanguage(code);
-      highlightCode(code, lang);
-
-      const wrap = document.createElement('div');
-      wrap.className = 'md-code-wrap';
-
-      const chrome = document.createElement('div');
-      chrome.className = 'md-code-chrome';
-
-      const pill = document.createElement('span');
-      pill.className = 'md-code-lang-pill';
-      pill.textContent = lang || 'plain';
-      chrome.appendChild(pill);
-
-      const copyBtn = document.createElement('button');
-      copyBtn.type = 'button';
-      copyBtn.className = 'md-code-copy';
-      copyBtn.title = 'Copy code';
-      copyBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="3" y="3" width="6.5" height="6.5" rx="1"/><path d="M3 7.5V2.5A.5.5 0 0 1 3.5 2h5"/></svg><span>Copy</span>';
-      copyBtn.addEventListener('click', function () {
-        copyText(code.textContent || '').then(function () {
-          copyBtn.classList.add('is-copied');
-          copyBtn.querySelector('span').textContent = 'Copied';
-          setTimeout(function () {
-            copyBtn.classList.remove('is-copied');
-            copyBtn.querySelector('span').textContent = 'Copy';
-          }, 1400);
-        });
-      });
-      chrome.appendChild(copyBtn);
-
-      // Insert: <wrap><chrome/><pre/></wrap>
-      pre.parentNode.insertBefore(wrap, pre);
-      wrap.appendChild(chrome);
-      wrap.appendChild(pre);
+      highlightCode(code); // no-op once done; retried after highlight.js loads
     });
+  }
+
+  function buildChrome(pre, code) {
+    const chrome = document.createElement('div');
+    chrome.className = 'md-code-chrome';
+
+    const pill = document.createElement('span');
+    pill.className = 'md-code-lang-pill';
+    pill.textContent = pre.classList.contains('frontmatter') ? 'front matter' : (detectLanguage(code) || 'plain');
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'md-code-copy';
+    copyBtn.title = 'Copy code';
+    copyBtn.innerHTML = COPY_ICON + '<span>Copy</span>';
+    const copyLabel = copyBtn.querySelector('span');
+    copyBtn.addEventListener('click', () => {
+      copyText(code.textContent || '').then((ok) => {
+        if (!ok) return;
+        copyLabel.textContent = 'Copied';
+        flash(copyBtn, 'is-copied', () => { copyLabel.textContent = 'Copy'; });
+      });
+    });
+
+    chrome.append(pill, copyBtn);
+    return chrome;
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -173,228 +177,270 @@
     CAUTION:   { cls: 'md-admon-caution',   icon: '⚠', label: 'Caution' },
     DANGER:    { cls: 'md-admon-danger',    icon: '×', label: 'Danger' },
   };
-  const ADMON_RE = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|DANGER)\]\s*(.*)$/i;
+  const ADMON_RE = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|DANGER)\](?=\s|$)/i;
 
-  function enhanceAdmonitions() {
-    document.querySelectorAll('blockquote').forEach((bq) => {
+  function enhanceAdmonitions(root) {
+    root.querySelectorAll('blockquote').forEach((bq) => {
       if (bq.hasAttribute(PROCESSED)) return;
-      const firstP = bq.querySelector(':scope > p');
-      if (!firstP) return;
-
-      // The marker can be the entire firstChild text node or split by <br>.
-      const firstText = (firstP.textContent || '').split('\n')[0];
-      const m = ADMON_RE.exec(firstText);
+      const first = bq.firstElementChild;
+      if (!first || first.tagName !== 'P') return;
+      const m = ADMON_RE.exec(first.textContent || '');
       if (!m) return;
-
-      const type = m[1].toUpperCase();
-      const meta = ADMON_TYPES[type];
-      if (!meta) return;
+      const meta = ADMON_TYPES[m[1].toUpperCase()];
 
       bq.setAttribute(PROCESSED, 'admon');
       bq.classList.add('md-admon', meta.cls);
+      stripMarker(first);
 
-      // Strip the marker token from the first paragraph.
-      // Walk the first paragraph's child nodes and remove the marker text.
-      const childNodes = Array.from(firstP.childNodes);
-      let stripped = false;
-      for (const node of childNodes) {
-        if (stripped) break;
-        if (node.nodeType === Node.TEXT_NODE) {
-          const newText = node.textContent.replace(ADMON_RE, '$2');
-          if (newText !== node.textContent) {
-            node.textContent = newText;
-            stripped = true;
-          }
-        }
-      }
-      // If marker took the whole first paragraph and nothing else follows on that
-      // line, remove the now-empty paragraph entirely.
-      if (firstP.textContent.trim() === '') firstP.remove();
-
-      // Build the title row.
       const title = document.createElement('div');
       title.className = 'md-admon-title';
       const icon = document.createElement('span');
       icon.className = 'md-admon-icon';
+      icon.setAttribute('aria-hidden', 'true');
       icon.textContent = meta.icon;
-      title.appendChild(icon);
       const label = document.createElement('span');
       label.textContent = meta.label;
-      title.appendChild(label);
+      title.append(icon, label);
       bq.insertBefore(title, bq.firstChild);
     });
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Reading progress bar
-  // ─────────────────────────────────────────────────────────────────────
-
-  let progressEl = null;
-  let progressFill = null;
-
-  function buildProgress() {
-    if (document.querySelector('.md-progress')) {
-      progressEl = document.querySelector('.md-progress');
-      progressFill = progressEl.querySelector('.md-progress-fill');
-      return;
+  // Remove the `[!TYPE]` marker and the line break after it from the start
+  // of the paragraph — a newline in the text, or a <br> when
+  // markdown.preview.breaks is on — and drop the paragraph if nothing is left.
+  function stripMarker(p) {
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node && !node.nodeValue.trim()) node = walker.nextNode();
+    if (node) {
+      node.nodeValue = node.nodeValue.replace(/^\s*\[![A-Za-z]+\][^\S\r\n]*(\r?\n)?/, '');
+      if (!node.nodeValue.trim()) {
+        let next = node.nextSibling;
+        while (next && next.nodeType === Node.TEXT_NODE && !next.nodeValue.trim()) next = next.nextSibling;
+        if (next && next.nodeName === 'BR') next.remove();
+        node.remove();
+      }
     }
-    progressEl = document.createElement('div');
-    progressEl.className = 'md-progress';
-    progressFill = document.createElement('div');
-    progressFill.className = 'md-progress-fill';
-    progressEl.appendChild(progressFill);
-    document.body.appendChild(progressEl);
-    updateProgress();
-  }
-
-  function updateProgress() {
-    if (!progressFill) return;
-    const doc = document.documentElement;
-    const scrolled = window.scrollY || doc.scrollTop;
-    const max = (doc.scrollHeight - doc.clientHeight) || 1;
-    const pct = Math.min(100, Math.max(0, (scrolled / max) * 100));
-    progressFill.style.width = pct.toFixed(2) + '%';
+    if (!p.textContent.trim() && !p.querySelector(':not(br)')) p.remove();
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Image zoom — click any inline image for a lightbox
+  // Images — click to zoom, captioned figures
   // ─────────────────────────────────────────────────────────────────────
 
-  function enhanceImages() {
-    document.querySelectorAll('img').forEach((img) => {
-      if (img.hasAttribute(PROCESSED)) return;
-      // Don't zoom the toggle/TOC button icons
-      if (img.closest('.md-theme-toggle, .md-toc, .md-toc-toggle, .md-progress, .md-mermaid-bar')) return;
+  function hasOwnText(el) {
+    for (const n of el.childNodes) {
+      if (n.nodeType === Node.TEXT_NODE && n.nodeValue.trim()) return true;
+    }
+    return false;
+  }
+
+  function enhanceImages(root) {
+    root.querySelectorAll('img').forEach((img) => {
+      if (img.hasAttribute(PROCESSED) || img.closest('.md-mermaid, .md-img-overlay')) return;
       img.setAttribute(PROCESSED, 'img');
-      img.addEventListener('click', function (e) {
+      if (img.closest('a[href]')) return; // linked images (badges, logos) keep their link
+      img.classList.add('md-zoomable');
+      img.addEventListener('click', (e) => {
         e.preventDefault();
-        showImageOverlay(img.src, img.alt);
+        showImageOverlay(img);
       });
     });
 
-    // Auto-wrap images-with-alt as <figure> with caption
-    document.querySelectorAll('p > img[alt]:only-child').forEach((img) => {
-      if (img.parentElement.hasAttribute(PROCESSED + '-fig')) return;
+    // An image alone in its paragraph is a block image; with alt text the
+    // paragraph becomes a captioned figure. It stays a <p> (see
+    // enhanceCodeBlocks for why). Images inline with text stay inline.
+    root.querySelectorAll('p > img:only-child').forEach((img) => {
       const p = img.parentElement;
-      if (!img.alt || !img.alt.trim()) return;
-      p.setAttribute(PROCESSED + '-fig', '1');
-      const fig = document.createElement('figure');
-      fig.className = 'md-figure';
-      fig.appendChild(img.cloneNode(true));
-      const cap = document.createElement('figcaption');
+      if (hasOwnText(p)) return;
+      const alt = (img.getAttribute('alt') || '').trim();
+      if (!alt) {
+        img.classList.add('md-block-img');
+        return;
+      }
+      p.classList.add('md-figure');
+      const cap = document.createElement('span');
       cap.className = 'md-figcaption';
-      cap.textContent = img.alt;
-      fig.appendChild(cap);
-      p.replaceWith(fig);
-      // Re-attach zoom on the cloned img
-      const newImg = fig.querySelector('img');
-      newImg.setAttribute(PROCESSED, 'img');
-      newImg.addEventListener('click', function (e) {
-        e.preventDefault();
-        showImageOverlay(newImg.src, newImg.alt);
-      });
+      cap.setAttribute('aria-hidden', 'true'); // repeats the alt text
+      cap.textContent = alt;
+      p.appendChild(cap);
     });
   }
 
-  function showImageOverlay(src, alt) {
+  function showImageOverlay(img) {
+    if (document.querySelector('.md-img-overlay')) return;
+    const previousFocus = document.activeElement;
+
     const overlay = document.createElement('div');
     overlay.className = 'md-img-overlay';
-    overlay.innerHTML = '<img src="' + escapeAttr(src) + '" alt="' + escapeAttr(alt || '') + '">';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', img.alt ? 'Image: ' + img.alt : 'Image');
+    overlay.tabIndex = -1;
+    const big = document.createElement('img');
+    big.src = img.currentSrc || img.src;
+    big.alt = img.alt || '';
+    overlay.appendChild(big);
+
     function close() {
       overlay.remove();
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
+      if (previousFocus && previousFocus.focus) previousFocus.focus({ preventScroll: true });
     }
-    function onKey(e) { if (e.key === 'Escape') close(); }
+    function onKey(e) {
+      if (e.key !== 'Escape') return;
+      // Keep VS Code (which receives every webview keydown) out of it.
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
     overlay.addEventListener('click', close);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     document.body.appendChild(overlay);
+    overlay.focus({ preventScroll: true });
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Floating TOC — auto-built from headings, with active-section tracking
+  // Floating TOC — built from h2–h4, with active-section tracking
   // ─────────────────────────────────────────────────────────────────────
 
   let tocPanel = null;
   let tocToggleBtn = null;
   let tocLinks = [];
+  let tocSignature = '';
+  let tocActive = null;
 
-  function buildToc() {
-    const headings = Array.from(document.querySelectorAll('h2[id], h3[id], h4[id]'));
+  function setTocOpen(open) {
+    tocPanel.classList.toggle('is-open', open);
+    tocToggleBtn.classList.toggle('is-active', open);
+    tocToggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
 
-    // Strip existing toc and toggle if heading set is empty (e.g. README is short)
+  function buildToc(root) {
+    const headings = Array.from(root.querySelectorAll('h2[id], h3[id], h4[id]'))
+      .filter((h) => !h.closest('.md-mermaid'));
+
+    // Not worth a TOC for short documents.
     if (headings.length < 2) {
       if (tocPanel) { tocPanel.remove(); tocPanel = null; }
       if (tocToggleBtn) { tocToggleBtn.remove(); tocToggleBtn = null; }
       tocLinks = [];
+      tocSignature = '';
+      tocActive = null;
       return;
     }
 
-    // Toggle button
-    if (!tocToggleBtn) {
+    if (!tocPanel || !tocPanel.isConnected) {
+      tocPanel = document.createElement('nav');
+      tocPanel.className = 'md-toc';
+      tocPanel.id = 'md-toc-panel';
+      tocPanel.setAttribute('aria-label', 'Table of contents');
+      document.body.appendChild(tocPanel);
+      tocSignature = '';
+    }
+    if (!tocToggleBtn || !tocToggleBtn.isConnected) {
       tocToggleBtn = document.createElement('button');
       tocToggleBtn.type = 'button';
       tocToggleBtn.className = 'md-toc-toggle';
       tocToggleBtn.title = 'Toggle table of contents';
       tocToggleBtn.setAttribute('aria-label', 'Toggle table of contents');
-      tocToggleBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 3.5h10M2 7h7M2 10.5h10" stroke-linecap="round"/></svg>';
-      tocToggleBtn.addEventListener('click', function () {
-        if (!tocPanel) return;
-        const open = tocPanel.classList.toggle('is-open');
-        tocToggleBtn.classList.toggle('is-active', open);
+      tocToggleBtn.setAttribute('aria-controls', 'md-toc-panel');
+      tocToggleBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2 3.5h10M2 7h7M2 10.5h10" stroke-linecap="round"/></svg>';
+      tocToggleBtn.addEventListener('click', () => {
+        if (tocPanel) setTocOpen(!tocPanel.classList.contains('is-open'));
       });
       document.body.appendChild(tocToggleBtn);
     }
+    setTocOpen(tocPanel.classList.contains('is-open'));
 
-    // Reposition toggle so it doesn't overlap the theme toggle (theme = top-right ~14px)
-    tocToggleBtn.style.top = '58px';
-    tocToggleBtn.style.right = '18px';
-
-    // Panel
-    if (!tocPanel) {
-      tocPanel = document.createElement('nav');
-      tocPanel.className = 'md-toc';
-      tocPanel.setAttribute('aria-label', 'Table of contents');
-      document.body.appendChild(tocPanel);
+    const items = headings.map((h) => ({ h: h, level: h.tagName.charAt(1), text: headingText(h) }));
+    const signature = items.map((i) => i.level + '#' + i.h.id + '\u0000' + i.text).join('\u0001');
+    if (signature === tocSignature) {
+      // Same outline; the heading elements themselves may have been replaced.
+      items.forEach((item, i) => { tocLinks[i].h = item.h; });
+      return;
     }
+    tocSignature = signature;
+    tocActive = null;
 
-    // Render entries
-    tocPanel.innerHTML = '';
     const head = document.createElement('div');
     head.className = 'md-toc-head';
     head.textContent = 'On this page';
-    tocPanel.appendChild(head);
 
     const list = document.createElement('ul');
     list.className = 'md-toc-list';
-    tocLinks = [];
-    headings.forEach((h) => {
+    tocLinks = items.map((item) => {
       const li = document.createElement('li');
-      li.className = 'lvl-' + h.tagName.charAt(1);
+      li.className = 'lvl-' + item.level;
       const a = document.createElement('a');
-      a.href = '#' + h.id;
-      a.dataset.targetId = h.id;
-      // Use the heading text minus any anchor link char
-      const text = (h.cloneNode(true));
-      const anchorInClone = text.querySelector('.md-anchor');
-      if (anchorInClone) anchorInClone.remove();
-      a.textContent = (text.textContent || '').trim();
+      a.href = '#' + item.h.id;
+      a.textContent = item.text;
       li.appendChild(a);
       list.appendChild(li);
-      tocLinks.push({ a: a, li: li, h: h });
+      return { li: li, h: item.h };
     });
-    tocPanel.appendChild(list);
+    tocPanel.replaceChildren(head, list);
   }
 
-  function updateTocActive() {
-    if (tocLinks.length === 0) return;
-    const yLine = window.scrollY + 120;
-    let active = tocLinks[0];
-    for (const item of tocLinks) {
-      if (item.h.offsetTop <= yLine) active = item;
-      else break;
+  // ─────────────────────────────────────────────────────────────────────
+  // Reading progress bar + active TOC entry (one rAF-batched scroll pass)
+  // ─────────────────────────────────────────────────────────────────────
+
+  let progressFill = null;
+
+  function buildProgress() {
+    if (progressFill && progressFill.isConnected) return;
+    let bar = document.querySelector('.md-progress');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'md-progress';
+      bar.setAttribute('aria-hidden', 'true');
+      const fill = document.createElement('div');
+      fill.className = 'md-progress-fill';
+      bar.appendChild(fill);
+      document.body.appendChild(bar);
     }
-    tocLinks.forEach(function (item) {
-      item.li.classList.toggle('is-active', item === active);
+    progressFill = bar.querySelector('.md-progress-fill');
+  }
+
+  function updateScrollUI() {
+    // Reads first…
+    const doc = document.documentElement;
+    const max = doc.scrollHeight - doc.clientHeight;
+    const pct = max > 0 ? Math.min(100, Math.max(0, (window.scrollY / max) * 100)) : 0;
+
+    let active = null;
+    if (tocLinks.length) {
+      // Heading positions come from getBoundingClientRect, which is right
+      // under page zoom and for headings nested in positioned blocks. The
+      // threshold is 120 CSS px of the (possibly zoomed) body.
+      const body = document.body;
+      const scale = body.clientWidth ? body.getBoundingClientRect().width / body.clientWidth : 1;
+      const threshold = 120 * scale;
+      active = tocLinks[0];
+      for (const item of tocLinks) {
+        const r = item.h.getBoundingClientRect();
+        if (!r.width && !r.height) continue; // not rendered (e.g. collapsed <details>)
+        if (r.top <= threshold) active = item; else break;
+      }
+    }
+
+    // …then writes.
+    if (progressFill) progressFill.style.width = pct.toFixed(2) + '%';
+    if (active !== tocActive) {
+      if (tocActive) tocActive.li.classList.remove('is-active');
+      if (active) active.li.classList.add('is-active');
+      tocActive = active;
+    }
+  }
+
+  let scrollQueued = false;
+  function requestScrollUpdate() {
+    if (scrollQueued) return;
+    scrollQueued = true;
+    requestAnimationFrame(() => {
+      scrollQueued = false;
+      updateScrollUI();
     });
   }
 
@@ -402,53 +448,85 @@
   // Helpers
   // ─────────────────────────────────────────────────────────────────────
 
+  const flashTimers = new WeakMap();
+  function flash(el, cls, done) {
+    clearTimeout(flashTimers.get(el));
+    el.classList.add(cls);
+    flashTimers.set(el, setTimeout(() => {
+      el.classList.remove(cls);
+      if (done) done();
+    }, 1400));
+  }
+
+  // Resolves to whether the text reached the clipboard.
   function copyText(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+      return navigator.clipboard.writeText(text).then(() => true, () => fallbackCopy(text));
     }
     return Promise.resolve(fallbackCopy(text));
   }
 
   function fallbackCopy(text) {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-      return true;
-    } catch (_) { return false; }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
   }
 
-  function escapeAttr(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
+  // previewScripts load `async`, so a sibling bundle may not be available yet.
+  function onScriptLoad(file, isReady, callback) {
+    if (isReady()) return;
+    const script = Array.from(document.scripts)
+      .find((s) => SCRIPT_DIR && s.src.split(/[?#]/)[0] === SCRIPT_DIR + file);
+    if (script) {
+      script.addEventListener('load', () => { if (isReady()) callback(); }, { once: true });
+      return;
+    }
+    let delay = 50, waited = 0;
+    (function poll() {
+      if (isReady()) { callback(); return; }
+      if (waited >= 30000) return;
+      waited += delay;
+      setTimeout(poll, delay);
+      delay = Math.min(delay * 2, 1000);
+    })();
   }
 
   // ─────────────────────────────────────────────────────────────────────
   // Master enhancement pass
   // ─────────────────────────────────────────────────────────────────────
 
+  const RELEVANT = 'h1, h2, h3, h4, h5, h6, pre, blockquote, img';
+
+  const observer = new MutationObserver((records) => {
+    for (const r of records) {
+      for (const node of r.addedNodes) {
+        if (node.nodeType === 1 && (node.matches(RELEVANT) || node.querySelector(RELEVANT))) {
+          enhanceAll();
+          return;
+        }
+      }
+    }
+  });
+
   function enhanceAll() {
     if (!document.body) return;
-    enhanceHeadings();
-    enhanceCodeBlocks();
-    enhanceAdmonitions();
-    enhanceImages();
+    const root = contentRoot();
+    enhanceHeadings(root);
+    enhanceCodeBlocks(root);
+    enhanceAdmonitions(root);
+    enhanceImages(root);
     buildProgress();
-    buildToc();
-    updateProgress();
-    updateTocActive();
-  }
-
-  function schedule() {
-    if (scheduled) return;
-    scheduled = true;
-    setTimeout(function () { scheduled = false; enhanceAll(); }, 60);
+    buildToc(root);
+    requestScrollUpdate();
+    // Our own DOM changes don't need another pass.
+    observer.takeRecords();
   }
 
   if (document.readyState === 'loading') {
@@ -456,41 +534,11 @@
   } else {
     enhanceAll();
   }
+  observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
-  // VS Code re-renders body on edits
-  const observer = new MutationObserver(function (mutations) {
-    for (const m of mutations) {
-      for (const node of m.addedNodes) {
-        if (node.nodeType !== 1) continue;
-        // Skip our own added nodes to avoid loops
-        if (node.classList && (
-          node.classList.contains('md-anchor') ||
-          node.classList.contains('md-code-wrap') ||
-          node.classList.contains('md-progress') ||
-          node.classList.contains('md-toc') ||
-          node.classList.contains('md-toc-toggle') ||
-          node.classList.contains('md-theme-toggle') ||
-          node.classList.contains('md-img-overlay') ||
-          node.classList.contains('md-admon-title') ||
-          node.classList.contains('md-figure') ||
-          node.classList.contains('md-mermaid')
-        )) continue;
-        if (node.matches && node.matches('h1, h2, h3, h4, h5, h6, pre, blockquote, img')) {
-          schedule();
-          return;
-        }
-        if (node.querySelector && node.querySelector('h1, h2, h3, h4, h5, h6, pre, blockquote, img')) {
-          schedule();
-          return;
-        }
-      }
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  // Scroll listener for progress bar + active TOC entry
-  window.addEventListener('scroll', function () {
-    updateProgress();
-    updateTocActive();
-  }, { passive: true });
+  // Fired by VS Code right after it morphs the preview for an edit.
+  window.addEventListener('vscode.markdown.updateContent', enhanceAll);
+  window.addEventListener('scroll', requestScrollUpdate, { passive: true });
+  window.addEventListener('resize', requestScrollUpdate);
+  onScriptLoad('highlight.min.js', () => typeof hljs !== 'undefined', enhanceAll);
 })();
