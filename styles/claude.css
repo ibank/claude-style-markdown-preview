@@ -863,11 +863,21 @@ pre.md-mermaid-error > code {
   font-family: var(--font-sans);
   box-shadow: var(--md-shadow);
   opacity: 0.85;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, transform 0.18s ease, visibility 0s;
   -webkit-user-select: none;
   user-select: none;
 }
 .md-theme-toggle:hover { opacity: 1; }
+
+/* Set by enhance.js while scrolling down when these floating controls would
+   cover the text; they return on scroll up (or keyboard focus). */
+body.md-controls-hidden .md-theme-toggle:not(:focus-within),
+body.md-controls-hidden .md-toc-toggle:not(:focus-visible) {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s;
+}
 
 .md-tt-opt {
   display: inline-flex;
@@ -962,7 +972,7 @@ pre.md-mermaid-error > code {
   color: var(--md-text-dim);
   cursor: pointer;
   box-shadow: var(--md-shadow);
-  transition: color 0.12s, background 0.12s;
+  transition: color 0.12s, background 0.12s, opacity 0.18s ease, transform 0.18s ease, visibility 0s;
   font-family: var(--font-mono);
   font-size: 13px;
 }

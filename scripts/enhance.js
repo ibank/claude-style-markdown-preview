@@ -387,6 +387,17 @@
   // ─────────────────────────────────────────────────────────────────────
 
   let progressFill = null;
+  let lastScrollY = window.scrollY;
+  let controlsHidden = false;
+
+  // In a narrow preview the floating theme toggle / TOC button cover the
+  // top-right of the text (where code and diagram toolbars sit). While
+  // scrolling down they step aside; scrolling up or reaching the top brings
+  // them back. They never hide while the TOC is open.
+  function floatingControlsOverlap() {
+    const toggle = document.querySelector('.md-theme-toggle');
+    return !!toggle && toggle.getBoundingClientRect().left < contentRoot().getBoundingClientRect().right;
+  }
 
   function buildProgress() {
     if (progressFill && progressFill.isConnected) return;
@@ -425,12 +436,24 @@
       }
     }
 
+    const y = window.scrollY;
+    const delta = y - lastScrollY;
+    lastScrollY = y;
+    let hide = controlsHidden;
+    if (y < 80 || (tocPanel && tocPanel.classList.contains('is-open'))) hide = false;
+    else if (delta > 4) hide = floatingControlsOverlap();
+    else if (delta < -4) hide = false;
+
     // …then writes.
     if (progressFill) progressFill.style.width = pct.toFixed(2) + '%';
     if (active !== tocActive) {
       if (tocActive) tocActive.li.classList.remove('is-active');
       if (active) active.li.classList.add('is-active');
       tocActive = active;
+    }
+    if (hide !== controlsHidden) {
+      controlsHidden = hide;
+      document.body.classList.toggle('md-controls-hidden', hide);
     }
   }
 
