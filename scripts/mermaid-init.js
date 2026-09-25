@@ -130,18 +130,24 @@
     return m ? m[0] : 'mermaid';
   }
 
+  // Whether a fence is ours to render: an explicit ```mermaid block, or an
+  // unlabeled one whose first line is a diagram header. Returns null otherwise.
+  function classify(code) {
+    const explicit = code.classList.contains('language-mermaid');
+    const source = (code.textContent || '').replace(/\s+$/, '');
+    if (!explicit) {
+      // Another language, VS Code's front matter block, or not a header.
+      if (/(^|\s)language-/.test(code.className) || code.parentElement.classList.contains('frontmatter')) return null;
+      if (!HEADER_RE.test(headerLine(source))) return null;
+    }
+    return { explicit, source };
+  }
+
   function findBlocks() {
     const blocks = [];
     document.querySelectorAll('pre > code:not([' + PROCESSED + '])').forEach((code) => {
-      const pre = code.parentElement;
-      const explicit = code.classList.contains('language-mermaid');
-      const source = (code.textContent || '').replace(/\s+$/, '');
-      if (!explicit) {
-        // Another language, VS Code's front matter block, or not a header.
-        if (/(^|\s)language-/.test(code.className) || pre.classList.contains('frontmatter')) return;
-        if (!HEADER_RE.test(headerLine(source))) return;
-      }
-      blocks.push({ code, pre, source, explicit });
+      const target = classify(code);
+      if (target) blocks.push({ code, pre: code.parentElement, source: target.source, explicit: target.explicit });
     });
     return blocks;
   }
@@ -152,9 +158,12 @@
 
   function cacheKey(theme, source) { return theme + '\n' + source; }
 
-  // `click` directives get their handlers from bindFunctions, which only work
-  // for the render that produced them, so interactive diagrams aren't cached.
-  function isInteractive(source) { return /^\s*click\s/m.test(source); }
+  // Interaction directives (`click`, and `link` / `callback` in class
+  // diagrams) get their handlers from bindFunctions, which only work for the
+  // render that produced them, so those diagrams aren't cached. A statement
+  // can start a line or follow a `;` (`flowchart LR; A-->B; click A ...`).
+  const INTERACTIVE_RE = /(?:^|;)\s*(?:click|link|callback)\s/m;
+  function isInteractive(source) { return INTERACTIVE_RE.test(source); }
 
   function errorMessage(err) {
     return (err && (err.message || err.str)) || String(err);
@@ -217,12 +226,14 @@
   }
 
   // morphdom updates a fence's <pre>/<code> in place, so by the time an async
-  // render finishes the block may hold different source, or have been placed
-  // or stripped meanwhile. Only a still-matching block may take the result.
+  // render finishes the block may hold different source, a different fence
+  // language (```mermaid → ```python), or have been placed meanwhile. Only a
+  // block that still classifies the same way may take the result.
   function blockIsCurrent(block) {
     const { pre, code } = block;
-    return pre.isConnected && code.parentElement === pre && !code.hasAttribute(PROCESSED) &&
-      (code.textContent || '').replace(/\s+$/, '') === block.source;
+    if (!pre.isConnected || code.parentElement !== pre || code.hasAttribute(PROCESSED)) return false;
+    const target = classify(code);
+    return !!target && target.explicit === block.explicit && target.source === block.source;
   }
 
   function cardIsCurrent(pre, source) {
