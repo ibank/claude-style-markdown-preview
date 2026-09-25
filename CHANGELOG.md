@@ -2,7 +2,7 @@
 
 All notable changes to this extension are documented here.
 
-## [0.6.0] - 2026-09-25
+## [0.6.0] - 2026-09-26
 
 A security and reliability release after a full review against the current
 VS Code preview (1.139). Every fix below was reproduced first in a harness
