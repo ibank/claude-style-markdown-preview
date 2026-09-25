@@ -13,40 +13,55 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          # @vscode/vsce 4 requires Node 22+.
+          node-version: "24"
 
+      # Tool versions are pinned so a release never picks up an unreviewed
+      # publisher CLI.
       - name: Package extension
-        run: npx --yes @vscode/vsce@latest package --no-dependencies
+        run: npx --yes @vscode/vsce@4.0.0 package --no-dependencies
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vsix
           path: "*.vsix"
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: "*.vsix"
           generate_release_notes: true
 
-      # Optional: publish to VS Code Marketplace.
-      # Requires repo secret VSCE_PAT (Azure DevOps PAT with Marketplace -> Manage scope).
-      - name: Publish to VS Code Marketplace
-        if: startsWith(github.ref, 'refs/tags/v') && env.VSCE_PAT != ''
+      # Secrets can't be referenced directly in `if:` conditions, so record
+      # here whether each token is set and gate the optional publish steps on
+      # this step's outputs.
+      - name: Check publish tokens
+        id: tokens
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce@latest publish --no-dependencies --pat "$VSCE_PAT"
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          echo "vsce=${VSCE_PAT:+yes}" >> "$GITHUB_OUTPUT"
+          echo "ovsx=${OVSX_PAT:+yes}" >> "$GITHUB_OUTPUT"
 
-      # Optional: publish to Open VSX (for VSCodium / Cursor).
+      # Optional: publish the packaged .vsix to the VS Code Marketplace.
+      # Requires repo secret VSCE_PAT (Azure DevOps PAT with Marketplace -> Manage scope).
+      - name: Publish to VS Code Marketplace
+        if: startsWith(github.ref, 'refs/tags/v') && steps.tokens.outputs.vsce == 'yes'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce@4.0.0 publish --packagePath *.vsix
+
+      # Optional: publish the packaged .vsix to Open VSX (for VSCodium / Cursor).
       # Requires repo secret OVSX_PAT.
       - name: Publish to Open VSX
-        if: startsWith(github.ref, 'refs/tags/v') && env.OVSX_PAT != ''
+        if: startsWith(github.ref, 'refs/tags/v') && steps.tokens.outputs.ovsx == 'yes'
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx --yes ovsx publish --no-dependencies -p "$OVSX_PAT"
+        run: npx --yes ovsx@1.2.0 publish *.vsix -p "$OVSX_PAT"
