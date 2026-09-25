@@ -47,7 +47,8 @@ VS Code 1.95 이상이 필요하다. 설정할 것은 없고, 기본 프리뷰�
 2. `Cmd+Shift+V` / `Ctrl+Shift+V`로 프리뷰를 열거나, `Cmd+K V` / `Ctrl+K V`로
    옆에 연다.
 3. 우상단 **Auto · Light · Dark**에서 테마를 고른다. 그 아래 ☰ 버튼은 목차를
-   연다(섹션이 두 개 이상인 문서에서 나타난다).
+   연다(섹션이 두 개 이상인 문서에서 나타난다). 폭이 좁은 프리뷰에서는 아래로
+   스크롤하는 동안 이 컨트롤이 비켜 주고, 위로 스크롤하면 다시 나타난다.
 
 ### Mermaid
 
@@ -64,6 +65,14 @@ flowchart LR
 언어를 지정하지 않은 블록은 첫 줄이 Mermaid 헤더(`graph TD`,
 `sequenceDiagram` 등)이고 파싱에 성공할 때만 다이어그램으로 그리며, 그렇지
 않으면 코드 블록으로 둔다. 모든 기능의 예시는 [`test.md`](test.md)에 있다.
+
+**VS Code 내장 Mermaid 지원.** 최신 VS Code는 프리뷰에서 Mermaid를 직접
+렌더링할 수 있다. 다이어그램이 이 확장의 팔레트와 Auto/Light/Dark 토글을
+따르도록, 이 확장은 `markdown-mermaid.languages`의 기본값을
+`["vscode-mermaid"]`로 바꿔 ` ```mermaid ` 블록을 넘겨받는다. 다이어그램
+하나만 VS Code로 그리려면 ` ```vscode-mermaid `를 쓰고, 전부 VS Code에
+돌려주려면 `"markdown-mermaid.languages": ["mermaid"]`로 설정한다. 노트북과
+채팅은 어느 쪽이든 영향을 받지 않는다.
 
 ### JavaScript API
 
@@ -104,7 +113,8 @@ body[data-claude-theme="light"] { --md-accent: #3b5bdb; --md-link: #3b5bdb; }
 - 다이어그램은 Mermaid `securityLevel: 'antiscript'`로 렌더링되어 라벨의
   `<script>` 태그와 이벤트 핸들러가 제거된다. 이 과정은 VS Code 프리뷰의
   Content Security Policy 안에서 실행된다.
-- Mermaid, highlight.js, Pretendard 폰트는 번들되어 있다. 라틴 폰트(Source
+- Mermaid, highlight.js, Pretendard 폰트는 번들되어 있다(Mermaid는
+  다이어그램이 있는 문서에서만 로드). 라틴 폰트(Source
   Sans 3, Source Serif 4, JetBrains Mono)는 Google Fonts에서 받는다. 이 요청이
   차단되거나 오프라인이면 시스템 폰트를 쓴다. 텔레메트리는 없다.
 - `localStorage`에는 테마 선택과 확대 비율만 저장한다.
@@ -115,7 +125,7 @@ body[data-claude-theme="light"] { --md-accent: #3b5bdb; --md-link: #3b5bdb; }
 
 확장 호스트 코드는 없다. `markdown.previewStyles`와
 `markdown.previewScripts`로 VS Code 기본 프리뷰에 스타일시트 하나와 스크립트
-여섯 개를 추가할 뿐이다.
+다섯 개를 추가할 뿐이다. 번들된 Mermaid는 필요할 때만 로드한다.
 
 | 파일 | 역할 |
 |---|---|
@@ -125,7 +135,7 @@ body[data-claude-theme="light"] { --md-accent: #3b5bdb; --md-link: #3b5bdb; }
 | `scripts/enhance.js` | 헤딩 링크, 코드 크롬과 구문 강조, 알림 블록, 이미지, 목차, 진행 막대 |
 | `scripts/mermaid-init.js` | 다이어그램 블록 탐지, 카드와 전체화면 보기 렌더링 |
 | `scripts/highlight.min.js` | highlight.js 11.12 (주요 언어) |
-| `scripts/mermaid.min.js` | Mermaid 11.17 (`mermaid` 전역 정의) |
+| `scripts/mermaid.min.js` | Mermaid 11.17. 프리뷰 스크립트가 아니며, 다이어그램이 있는 문서에서만 `mermaid-init.js`가 로드한다 |
 
 VS Code는 프리뷰 스크립트를 `async`로 로드하므로, 어느 스크립트도 다른
 스크립트가 먼저 실행됐다고 가정하지 않는다.
@@ -151,7 +161,7 @@ VS Code 때문에 바뀌면 `theme-toggle.js`가 `data-claude-theme`을 갱신�
 claude-style-markdown-preview/
 ├── package.json              # 매니페스트 (contribution만, `main` 없음)
 ├── styles/claude.css         # 스타일과 테마 변수
-├── scripts/                  # 위에서 설명한 프리뷰 스크립트 여섯 개
+├── scripts/                  # 위에서 설명한 프리뷰 스크립트와 번들
 ├── fonts/                    # Pretendard Variable (한글)
 ├── test.md                   # 수동 QA용 샘플 (패키지에 미포함)
 ├── CHANGELOG.md · LICENSE · THIRD_PARTY_NOTICES.md

@@ -28,6 +28,17 @@ injected after load, morphdom updates, and its own code copy buttons.
   never used by the stylesheet, so editing them changed nothing.
 
 ### Fixed
+- **Diagrams were drawn by VS Code instead of this extension.** Since
+  mid-2026 VS Code ships a built-in Mermaid renderer
+  (`mermaid-markdown-features`, formerly `bierner.markdown-mermaid`). Its
+  markdown-it plugin claims ```` ```mermaid ```` fences before the preview
+  scripts run, so this extension's diagram cards, toolbar and Auto/Light/Dark
+  toggle never applied, and its Mermaid bundle loaded for nothing. The
+  extension now sets the default of `markdown-mermaid.languages` to
+  `["vscode-mermaid"]`, so ```` ```mermaid ```` blocks reach it again.
+  ```` ```vscode-mermaid ```` still uses VS Code's renderer (now framed like the
+  extension's cards), and `"markdown-mermaid.languages": ["mermaid"]` hands
+  everything back. Notebooks and chat are unaffected.
 - **Endless render loop.** A code block in any language whose first word was
   a Mermaid keyword, such as Python `graph = build_graph()`, was treated as a
   diagram and nested a new error box about every 60 ms for as long as the
@@ -58,16 +69,21 @@ injected after load, morphdom updates, and its own code copy buttons.
   scrolls. Fullscreen pan and zoom stay accurate under page zoom.
 - **Duplicate copy buttons**: VS Code (since mid-2026) adds its own hover
   copy button to code blocks. It's hidden where the chrome bar has one.
-- **Late script loads**: highlighting and diagrams no longer depend on
-  `highlight.min.js` / `mermaid.min.js` finishing before the other scripts,
-  which VS Code doesn't guarantee (they load `async`). Mermaid waits for its
-  script instead of giving up after 2 s.
+- **Late script loads**: highlighting no longer depends on `highlight.min.js`
+  finishing before `enhance.js`, which VS Code doesn't guarantee (preview
+  scripts load `async`). Mermaid used to give up if its bundle took longer
+  than 2 s; it is now loaded on demand (see Changed).
 - Front matter keys (VS Code's new front-matter table) are no longer
   uppercased; syntax tokens for symbols, bullets and links got their missing
   color; the heading ¶ link copies `#section` (usable in markdown) instead of
   the webview's internal URL.
 
 ### Changed
+- **Mermaid is loaded only when a document contains a diagram** instead of
+  in every preview, so most previews no longer parse its 3.5 MB bundle.
+- In a narrow preview, the floating theme toggle and TOC button **step aside
+  while you scroll down**, instead of covering the top-right of the text,
+  where code and diagram toolbars sit. They return when you scroll up.
 - Respects VS Code's own **Reduce Motion** setting as well as the OS one.
 - Closed TOC, hidden zoom badge and overlays are keyboard- and
   screen-reader-friendly (hidden panels leave the tab order; overlays are

@@ -229,6 +229,13 @@ graph LR
   Draft --> Review --> Ship
 ```
 
+VS Code 내장 Mermaid 렌더러로 그리는 블록(내장 렌더러가 있는 VS Code에서만 다이어그램으로 보이며, 이 확장의 카드와 같은 테두리여야 합니다):
+
+```vscode-mermaid
+flowchart LR
+  VS[VS Code 내장] --> R[렌더러]
+```
+
 Mermaid 11 전용 다이어그램:
 
 ```mermaid

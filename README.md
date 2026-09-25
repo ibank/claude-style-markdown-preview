@@ -50,7 +50,8 @@ restyles the built-in preview.
    `Cmd+K V` / `Ctrl+K V`.
 3. Pick a theme with **Auto · Light · Dark** in the top-right corner. The ☰
    button under it opens the table of contents; it appears once a document
-   has at least two sections.
+   has at least two sections. In a narrow preview these controls step aside
+   while you scroll down and come back when you scroll up.
 
 ### Mermaid
 
@@ -68,6 +69,15 @@ A fence without a language is drawn as a diagram only if its first line is a
 Mermaid header (such as `graph TD` or `sequenceDiagram`) and it parses;
 otherwise it stays a code block. [`test.md`](test.md) has samples of every
 feature.
+
+**VS Code's built-in Mermaid support.** Recent VS Code versions can render
+Mermaid in the preview themselves. So that diagrams match this extension's
+palette and follow its Auto/Light/Dark toggle, the extension changes the
+default of `markdown-mermaid.languages` to `["vscode-mermaid"]`, which leaves
+` ```mermaid ` blocks to it. To have VS Code draw a single diagram, write
+` ```vscode-mermaid `. To hand every diagram back to VS Code, set
+`"markdown-mermaid.languages": ["mermaid"]`. Notebooks and chat are not
+affected either way.
 
 ### JavaScript API
 
@@ -109,7 +119,8 @@ Common tokens are `--md-bg`, `--md-text`, `--md-heading`, `--md-accent`,
 - Diagrams render with Mermaid's `securityLevel: 'antiscript'`, which strips
   `<script>` tags and event handlers from labels. This runs inside VS Code's
   preview Content Security Policy.
-- Mermaid, highlight.js and the Pretendard font are bundled. The Latin fonts
+- Mermaid, highlight.js and the Pretendard font are bundled (Mermaid is only
+  loaded for documents that contain a diagram). The Latin fonts
   (Source Sans 3, Source Serif 4, JetBrains Mono) load from Google Fonts. If
   that request is blocked or you are offline, system fonts are used instead.
   There is no telemetry.
@@ -120,8 +131,8 @@ To report a security issue, open an issue on the repository.
 ## How it works
 
 The extension has no extension-host code. It contributes one stylesheet and
-six scripts to VS Code's built-in preview through `markdown.previewStyles` and
-`markdown.previewScripts`.
+five scripts to VS Code's built-in preview through `markdown.previewStyles` and
+`markdown.previewScripts`. The bundled Mermaid is loaded on demand.
 
 | File | Role |
 |---|---|
@@ -131,7 +142,7 @@ six scripts to VS Code's built-in preview through `markdown.previewStyles` and
 | `scripts/enhance.js` | Heading links, code chrome and highlighting, admonitions, images, TOC, progress bar |
 | `scripts/mermaid-init.js` | Finds diagram fences, renders the cards and the fullscreen view |
 | `scripts/highlight.min.js` | highlight.js 11.12 (common languages) |
-| `scripts/mermaid.min.js` | Mermaid 11.17 (defines the `mermaid` global) |
+| `scripts/mermaid.min.js` | Mermaid 11.17. Not a preview script: `mermaid-init.js` loads it only when a document has a diagram |
 
 VS Code loads preview scripts `async`, so none of them relies on another
 having run first.
@@ -159,7 +170,7 @@ redrawn in the new theme.
 claude-style-markdown-preview/
 ├── package.json              # manifest (contributions only, no `main`)
 ├── styles/claude.css         # styling and theme tokens
-├── scripts/                  # the six preview scripts described above
+├── scripts/                  # the preview scripts and bundles described above
 ├── fonts/                    # Pretendard Variable (Hangul)
 ├── test.md                   # manual QA sample (not packaged)
 ├── CHANGELOG.md · LICENSE · THIRD_PARTY_NOTICES.md
