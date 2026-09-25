@@ -7,15 +7,17 @@ under its own license, reproduced below or referenced.
 
 ## Mermaid
 
-- **Version**: 10.9.1
+- **Version**: 11.17.2
 - **Source**: https://github.com/mermaid-js/mermaid
 - **License**: MIT
-- **Bundled file**: `scripts/mermaid.min.js`
+- **Bundled file**: `scripts/mermaid.min.js` (the published `dist/mermaid.min.js`
+  IIFE build; licenses of the libraries it inlines are preserved in its
+  trailing comments)
 
 ```
-MIT License
+The MIT License (MIT)
 
-Copyright (c) 2014 - 2024 Knut Sveidqvist
+Copyright (c) 2014 - 2022 Knut Sveidqvist
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -78,10 +80,11 @@ Full license text: https://openfontlicense.org/open-font-license-official-text/
 
 ## highlight.js
 
-- **Version**: 11.9.0
+- **Version**: 11.12.0
 - **Source**: https://github.com/highlightjs/highlight.js
 - **License**: BSD-3-Clause
-- **Bundled file**: `scripts/highlight.min.js` (common languages build)
+- **Bundled file**: `scripts/highlight.min.js` (common languages build, from
+  `@highlightjs/cdn-assets`)
 
 ```
 BSD 3-Clause License
