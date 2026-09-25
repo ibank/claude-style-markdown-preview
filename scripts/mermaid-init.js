@@ -17,6 +17,8 @@
   const TAG = '[claude-md-mermaid]';
   const PROCESSED = 'data-mermaid-processed';
   const SCRIPT_DIR = ((document.currentScript && document.currentScript.src) || '').replace(/[^/]*$/, '');
+  // The preview's CSP only runs scripts carrying its nonce; reuse ours.
+  const NONCE = (document.currentScript && document.currentScript.nonce) || '';
   const CACHE_MAX = 64;
 
   const cache = new Map(); // theme + '\n' + source -> { svg } | { error }
@@ -30,6 +32,25 @@
 
   function mermaidReady() {
     return typeof mermaid !== 'undefined' && typeof mermaid.render === 'function';
+  }
+
+  // Mermaid (~3.5 MB) is fetched only when a document has a diagram to
+  // render: most previews have none, so they skip parsing it entirely.
+  let mermaidLoad = null;
+  function loadMermaid() {
+    if (mermaidReady()) return Promise.resolve(true);
+    if (!mermaidLoad) {
+      mermaidLoad = new Promise((resolve) => {
+        if (!SCRIPT_DIR) { warn('cannot locate mermaid.min.js'); resolve(false); return; }
+        const script = document.createElement('script');
+        script.src = SCRIPT_DIR + 'mermaid.min.js';
+        if (NONCE) script.nonce = NONCE;
+        script.onload = () => resolve(mermaidReady());
+        script.onerror = () => { warn('mermaid.min.js failed to load'); resolve(false); };
+        document.head.appendChild(script);
+      });
+    }
+    return mermaidLoad;
   }
 
   // Mermaid theme for the effective preview theme. VS Code tags High
@@ -220,7 +241,7 @@
   // Swap in everything already cached for the current theme. Synchronous, so
   // a morphdom update never gets painted with raw diagram sources.
   function syncPass() {
-    if (!mermaidReady() || !document.body) return;
+    if (!document.body) return;
     const theme = currentTheme();
     let pending = false;
     for (const block of findBlocks()) {
@@ -241,6 +262,7 @@
     if (busy) { again = true; return; }
     busy = true;
     try {
+      if (!(await loadMermaid())) return;
       await fontsSettled();
       do {
         again = false;
@@ -504,7 +526,6 @@
   // ─────────────────────────────────────────────────────────────────────
 
   const observer = new MutationObserver((records) => {
-    if (!mermaidReady()) return;
     for (const r of records) {
       for (const node of r.addedNodes) {
         if (node.nodeType === 1 && (node.matches('pre, code') || node.querySelector('pre > code'))) {
@@ -515,32 +536,12 @@
     }
   });
 
-  // previewScripts load `async`, so mermaid.min.js may still be downloading
-  // (large file; slow on remote setups). Wait for its load event rather than
-  // giving up after a fixed number of polls.
-  function whenMermaidLoaded(callback) {
-    if (mermaidReady()) { callback(); return; }
-    const script = Array.from(document.scripts)
-      .find((s) => SCRIPT_DIR && s.src.split(/[?#]/)[0] === SCRIPT_DIR + 'mermaid.min.js');
-    if (script) {
-      script.addEventListener('load', () => {
-        if (mermaidReady()) callback(); else warn('mermaid.min.js loaded without defining `mermaid`');
-      }, { once: true });
-      script.addEventListener('error', () => warn('mermaid.min.js failed to load'), { once: true });
-      return;
-    }
-    let delay = 50, waited = 0;
-    (function poll() {
-      if (mermaidReady()) { callback(); return; }
-      if (waited >= 30000) { warn('mermaid did not load'); return; }
-      waited += delay;
-      setTimeout(poll, delay);
-      delay = Math.min(delay * 2, 1000);
-    })();
-  }
-
   observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
   window.addEventListener('vscode.markdown.updateContent', syncPass);
   document.addEventListener('claude-theme-change', syncPass);
-  whenMermaidLoaded(syncPass);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', syncPass);
+  } else {
+    syncPass();
+  }
 })();

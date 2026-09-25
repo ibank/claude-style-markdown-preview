@@ -53,9 +53,13 @@
       "./scripts/page-zoom.js",
       "./scripts/highlight.min.js",
       "./scripts/enhance.js",
-      "./scripts/mermaid.min.js",
       "./scripts/mermaid-init.js"
-    ]
+    ],
+    "configurationDefaults": {
+      "markdown-mermaid.languages": [
+        "vscode-mermaid"
+      ]
+    }
   },
   "scripts": {
     "package": "vsce package --no-dependencies",

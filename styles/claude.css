@@ -811,6 +811,16 @@ pre.md-mermaid > code { display: none; }
   max-height: 100%;
 }
 
+/* VS Code's built-in Mermaid renderer (```vscode-mermaid fences, `::: mermaid`
+   containers, or when the user routes ```mermaid back to it): same card
+   frame. Frame only — no padding, so its pan/zoom sizing is untouched. */
+.markdown-body .mermaid-wrapper {
+  margin: 1.6em 0;
+  border-color: var(--md-border);
+  border-radius: 10px;
+  background: var(--md-bg-elevated);
+}
+
 /* Invalid ```mermaid block: an error banner on top of its (visible) source. */
 pre.md-mermaid-error {
   padding: 0;
