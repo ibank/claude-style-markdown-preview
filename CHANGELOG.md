@@ -2,6 +2,86 @@
 
 All notable changes to this extension are documented here.
 
+## [0.6.0] - 2026-09-25
+
+A security and reliability release after a full review against the current
+VS Code preview (1.139). Every fix below was reproduced first in a harness
+that mirrors VS Code's preview runtime: async preview scripts, content
+injected after load, morphdom updates, and its own code copy buttons.
+
+### Security
+- **Mermaid 10.9.1 → 11.17.2.** 10.9.1 is affected by nine published
+  advisories: a high-severity prototype pollution in its bundled DOMPurify
+  (GHSA-m4gq-x24j-jpmf), sequence-diagram label XSS (GHSA-7rqq-prvp-x9jh),
+  state-diagram HTML injection (GHSA-ghcm-xqfw-q4vr), several CSS injection
+  issues, and infinite-loop DoS in Gantt and XY charts. v11 also renders the
+  newer diagram types (architecture, packet, kanban, radar, treemap, …).
+  The 0.3.0 note saying v11 lacks a usable `mermaid` global was wrong: its
+  `dist/mermaid.min.js` still defines one.
+- highlight.js 11.9.0 → 11.12.0 (grammar fixes; same languages and API).
+
+### Added
+- `<body data-claude-theme="light|dark">` reflects the theme actually shown,
+  which gives user stylesheets (`markdown.styles`) a reliable hook for
+  overriding the `--md-*` tokens. The README's Customization section now
+  documents this. The `--claude-orange` variables it used to recommend were
+  never used by the stylesheet, so editing them changed nothing.
+
+### Fixed
+- **Endless render loop.** A code block in any language whose first word was
+  a Mermaid keyword, such as Python `graph = build_graph()`, was treated as a
+  diagram and nested a new error box about every 60 ms for as long as the
+  preview stayed open. Only ```` ```mermaid ```` fences are rendered now,
+  plus unlabeled fences whose first line is a Mermaid header and that parse.
+- **Text deleted next to inline images.** "Click the ![gear](…) icon" lost
+  its sentence, which was replaced by a captioned figure.
+- **Linked images** (badges, logos) opened the lightbox instead of the link.
+- **`[!NOTE]` marker still visible** in admonitions that span several lines,
+  and a stray blank line when `markdown.preview.breaks` is on.
+- **Enhancements vanished after edits.** VS Code updates the preview in place
+  and then fires `vscode.markdown.updateContent`. Everything is now
+  re-applied synchronously in that event, so heading anchors, admonitions,
+  code chrome and diagrams never flash or disappear while you type.
+  Diagrams are restored from a cache instead of being re-rendered.
+- **Open `<details>` collapsed on every edit**, and embedded media restarted.
+  Enhancements are now applied inside the elements VS Code renders rather
+  than by wrapping or replacing them, so VS Code can match them in place.
+  This also makes edits on long documents about 2.8× faster (127 → 46 ms on a
+  2,700-line test document).
+- **High Contrast Light** used the dark palette and dark diagrams.
+- **Diagrams didn't follow VS Code theme changes** in Auto mode (only the
+  toggle re-themed them).
+- **Cmd/Ctrl `+` / `-` / `0` zoomed the whole VS Code window too**, or moved
+  focus to the side bar, because the webview forwards every keydown.
+- **The zoom badge had no theme colors** (bare black text on dark themes).
+- **Inline diagram zoom clipped the diagram**. The card now grows and
+  scrolls. Fullscreen pan and zoom stay accurate under page zoom.
+- **Duplicate copy buttons**: VS Code (since mid-2026) adds its own hover
+  copy button to code blocks. It's hidden where the chrome bar has one.
+- **Late script loads**: highlighting and diagrams no longer depend on
+  `highlight.min.js` / `mermaid.min.js` finishing before the other scripts,
+  which VS Code doesn't guarantee (they load `async`). Mermaid waits for its
+  script instead of giving up after 2 s.
+- Front matter keys (VS Code's new front-matter table) are no longer
+  uppercased; syntax tokens for symbols, bullets and links got their missing
+  color; the heading ¶ link copies `#section` (usable in markdown) instead of
+  the webview's internal URL.
+
+### Changed
+- Respects VS Code's own **Reduce Motion** setting as well as the OS one.
+- Closed TOC, hidden zoom badge and overlays are keyboard- and
+  screen-reader-friendly (hidden panels leave the tab order; overlays are
+  dialogs that take and return focus).
+- Trackpad pinch zoom is proportional (smooth) instead of 10% per event.
+- Print ignores the on-screen page zoom and prints High Contrast themes on
+  white.
+- Internal class names changed: `.md-code-wrap` → `pre.md-code`; diagram
+  cards and errors are `pre.md-mermaid` / `pre.md-mermaid-error`.
+- Release workflow: Node 24 (Node 20 left GitHub runners on 2026-09-16), the
+  current action majors, and pinned vsce 4.0.0 / ovsx 1.2.0. The optional
+  Marketplace / Open VSX publish steps could never run and now work when
+  their secrets are set.
+
 ## [0.5.1] - 2026-05-24
 
 ### Fixed

@@ -2,7 +2,7 @@
   "name": "claude-style-markdown-preview",
   "displayName": "Claude Style Markdown Preview",
   "description": "A markdown preview styled like Claude Code (hybrid serif + sans + mono with Hangul Pretendard fallback). Claude-themed syntax highlighting, Auto/Light/Dark segmented toggle, page zoom, heading anchors, code copy, GitHub-flavored admonitions, reading progress, image zoom, floating TOC, and Mermaid diagrams with toolbar.",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "publisher": "ibank",
   "license": "MIT",
   "author": {
@@ -62,6 +62,6 @@
     "publish": "vsce publish --no-dependencies"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.6.0"
+    "@vscode/vsce": "^4.0.0"
   }
 }

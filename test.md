@@ -1,6 +1,11 @@
-# Claude Style Markdown Preview — v0.2 Test
+---
+title: QA sample
+tags: [preview, qa]
+---
 
-이 문서는 v0.2의 모든 새 기능을 한 번에 검증하는 샘플입니다. 한글 본문은 **Pretendard**로, 라틴/영어는 **Source Sans 3 + Source Serif 4 + JetBrains Mono**로 렌더되어야 해요.
+# Claude Style Markdown Preview — QA Sample
+
+이 문서는 프리뷰의 모든 기능을 한 번에 검증하는 샘플입니다. 맨 위 front matter는 VS Code가 표로 보여주며, 키가 대문자로 바뀌지 않아야 합니다. 한글 본문은 **Pretendard**로, 라틴/영어는 **Source Sans 3 + Source Serif 4 + JetBrains Mono**로 렌더되어야 해요.
 
 ## Typography
 
@@ -26,7 +31,7 @@
 
 ## Heading anchors
 
-위쪽 헤딩에 마우스를 올려보세요. 우측에 `¶` 기호가 페이드인되고, 클릭하면 deep-link URL이 클립보드에 복사됩니다 ("copied" 라벨이 잠깐 표시됨).
+위쪽 헤딩에 마우스를 올려보세요. 우측에 `¶` 기호가 페이드인되고, 클릭하면 `#heading-anchors` 같은 섹션 링크가 클립보드에 복사됩니다 ("copied" 라벨이 잠깐 표시됨).
 
 ## Code blocks
 
@@ -188,3 +193,55 @@ Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deseru
 
 ### Section E — 마지막
 페이지 끝까지 스크롤하면 진행률 바가 100%에 도달해야 합니다.
+
+---
+
+## Regression checks (0.6.0)
+
+아래 항목은 0.6.0에서 고친 버그의 재현 케이스입니다. 문서를 편집(아무 글자나 입력)한 뒤에도 모양이 그대로 유지되어야 합니다.
+
+> [!NOTE]
+> 여러 줄로 된 알림입니다.
+> 첫 줄의 알림 마커는 보이지 않고, 두 줄 모두 본문으로 보여야 합니다.
+
+텍스트 사이의 ![점](data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiI+PGNpcmNsZSBjeD0iNiIgY3k9IjYiIHI9IjUiIGZpbGw9IiNkOTc3NTciLz48L3N2Zz4=) 아이콘 이미지 — 이 문장은 사라지지 않아야 합니다.
+
+[![GitHub](https://img.shields.io/badge/GitHub-repo-d97757)](https://github.com/ibank/claude-style-markdown-preview) ← 배지를 클릭하면 링크가 열려야 합니다 (라이트박스 X).
+
+`graph`로 시작하는 Python 코드는 Mermaid 오류가 아니라 코드 블록이어야 합니다:
+
+```python
+graph = build_graph()
+print(graph)
+```
+
+언어 없는 블록이 `timeline`으로 시작해도 평범한 텍스트여야 합니다:
+
+```
+timeline of events
+- 2024: started
+```
+
+언어 없는 블록이라도 Mermaid 헤더로 시작하고 파싱되면 다이어그램으로 그립니다:
+
+```
+graph LR
+  Draft --> Review --> Ship
+```
+
+Mermaid 11 전용 다이어그램:
+
+```mermaid
+kanban
+  todo[Todo]
+    t1[문서 정리]
+  done[Done]
+    t2[릴리스]
+```
+
+<details>
+<summary>펼친 뒤 문서를 편집해 보세요 — 닫히지 않아야 합니다</summary>
+
+접힌 내용입니다.
+
+</details>
